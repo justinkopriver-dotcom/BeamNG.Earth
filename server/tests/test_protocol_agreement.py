@@ -148,7 +148,8 @@ TERRAIN = {"cx": F(NUM), "cy": F(NUM), "heightmap": F(str), "size": F(int), "squ
 SERVER_TO_MOD = {
     "server_list": {"servers": F(list, OPT), "error": F(str, OPT)},   # earthd.server_list (the list service)
     "geocode_result": {"id": F(int), "results": F(list), "error": F(str, OPT)},   # geocode.py (Photon)
-    "route_result": {"id": F(int), "points": F(list), "dist": F(NUM), "dur": F(NUM), "error": F(str, OPT)},  # OSRM
+    "route_result": {"id": F(int), "points": F(list), "dist": F(NUM), "dur": F(NUM), "turns": F(list, OPT),
+                     "error": F(str, OPT)},  # OSRM; turns: the GPS's turn-by-turn (routing.turns)
     "update": {"current": F(str), "latest": F(str), "url": F(str)},   # a newer version on GitHub (updates.py)
     "update_status": {"state": F(str), "text": F(str), "done": F(int, OPT), "total": F(int, OPT),
                       "version": F(str, OPT)},      # the "Update now" download (selfupdate.py)
