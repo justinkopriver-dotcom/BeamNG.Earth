@@ -68,7 +68,8 @@ local gps = require('beamngEarth/gps')               -- the game's GPS route to 
 local wallet = require('beamngEarth/wallet')         -- the player's money: fuel and tolls (wallet.lua)
 local jobs = require('beamngEarth/jobs')             -- garage-to-garage deliveries (jobs.lua)
 local dynweather = require('beamngEarth/dynweather')   -- the week's dynamic weather (dynweather.lua)
-local heat = require('beamngEarth/heat')             -- police heat: plates remembered, fines, footage (heat.lua)
+local heat = require('beamngEarth/heat')
+local garage = require('beamngEarth/garage')         -- repair shops and property (garage.lua)             -- police heat: plates remembered, fines, footage (heat.lua)
 local roadweather = require('beamngEarth/roadweather') -- rain and snow on the roads: grip and look
 local collisionfoci = require('beamngEarth/collisionfoci') -- other vehicles' collision islands
 local terrainpatch = require('beamngEarth/terrainpatch')   -- ground under the islands off the terrain block
@@ -642,6 +643,7 @@ local function formatKnown(f)
 end
 
 local geocodeResults = {}       -- the world map's address search answers: id -> { results, error }
+local placesResults = {}        -- the Garage app's nearby shops / property: id -> the server's message
 local mediaState = nil          -- the phone's Music app: the server's last media_state
 local jobResults = {}           -- the Jobs app's delivery offers: id -> the server's message
 local fuelResults = {}          -- the world map's "Nearest gas station" answers: id -> the server's message
@@ -882,6 +884,8 @@ local function onMessage(msg)
     if msg.id then routeResults[msg.id] = { points = msg.points or {}, dist = msg.dist, dur = msg.dur, error = msg.error } end
   elseif t == 'geocode_result' then
     if msg.id then geocodeResults[msg.id] = { results = msg.results or {}, error = msg.error } end
+  elseif t == 'places_near_result' then
+    if msg.id then placesResults[msg.id] = msg end
   elseif t == 'media_state' then
     mediaState = msg
   elseif t == 'delivery_jobs_result' then
@@ -1673,6 +1677,7 @@ local function onUpdate(dtReal, dtSim)
   if st.inOurLevel then pcall(roadweather.update) end
   if st.inOurLevel then
     pcall(heat.update, dtSim)
+    pcall(garage.update)
     local stg2 = rawget(_G, 'beamngEarth_settings')
     local mins = stg2 and stg2.gameClock and stg2.gameClock() or nil
     pcall(dynweather.update, dtSim, mins, st.player and st.player.lat, st.player and st.player.lon)
@@ -2196,6 +2201,16 @@ function M.requestGeocode(id, q, lat, lon)
   return true
 end
 -- The world map's "Nearest gas station": the answer is nearest_fuel_result (takeNearestFuel).
+function M.requestPlacesNear(id, lat, lon, kind)
+  if not net.isConnected() then return false end
+  net.send({ type = 'places_near', id = id, lat = lat, lon = lon, kind = kind })
+  return true
+end
+function M.takePlacesNear(id)
+  local r = placesResults[id]
+  placesResults[id] = nil
+  return r
+end
 function M.requestMedia(action)
   if not net.isConnected() then return false end
   net.send({ type = 'media', id = 1, action = action })
