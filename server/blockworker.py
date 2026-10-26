@@ -380,6 +380,13 @@ def roads_tile(aid, lat, lon, zoom, tx, ty, out_dir, vfs_dir, sidewalks, lift, b
     lines = [] if buildings else None
     wires = [] if buildings else None
     guide = [] if buildings else None
+    divisions = []                      # county outlines for the county line signs (guidesigns.py); none offline
+    if buildings:
+        try:
+            divisions = [_s.md.cell(k, layers=("divisions",), kind="demand").layers.get("divisions")
+                         for k in roadsmod.cells_of_tile(frame, tx, ty)]
+        except Exception as e:      # an unreachable source costs the county signs, not the tile
+            log.debug("county outlines of road tile %d_%d: %s", tx, ty, e)
     park = [] if buildings else None
     items = town = None
     if buildings:
@@ -398,7 +405,7 @@ def roads_tile(aid, lat, lon, zoom, tx, ty, out_dir, vfs_dir, sidewalks, lift, b
                                          (box[0] - 8, box[1] - 8, box[2] + 8, box[3] + 8))
     chunks = roadsmod.build_tile(frame, tx, ty, cells, elev, urban, walks=walks, deck_context=ctx, bridges=bridges, widths=_s.widths,
                                  walk_cuts=fuel_cuts,    # (the stations' made-up driveways: no sidewalk across them)
-                                 props=props, lines=lines, wires=wires, town=town, park=park, guide=guide,
+                                 props=props, lines=lines, wires=wires, town=town, park=park, guide=guide, divisions=divisions,
                                  left_hand=left_hand, mph=mph, structures=buildingsmod.centres(items, tx, ty) if items else (),
                                  tunnels=tunnels, walls=rwalls,
                                  ground=lambda x, y: roadmeshmod.drawn_ground(frame, drawn, np.c_[x, y], q),
