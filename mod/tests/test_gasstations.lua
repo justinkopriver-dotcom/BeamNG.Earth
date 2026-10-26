@@ -13,6 +13,7 @@ career_career = { isActive = function() return careerOn end }
 freeroam_gasStations = { formatGasStationPoi = function(f) return { id = f.id, data = { type = 'gasStation', facility = f } } end }
 
 local G = require('beamngEarth/gasstations')
+G.enabled = true
 local clock = 0
 G.now = function() return clock end
 local collide = 0
@@ -128,24 +129,6 @@ T.check(scenetree.findObject('bne_fuel_late_a3') ~= nil and count('BeamNGGamepla
 local cbefore = collide
 G.dropKey('1:9_9'); G.dropKey('2:9_9'); G.dropKey('2:9_8')
 T.check(collide == cbefore + 1, 'a collision rebuild after the delete')
-G.reset()
-
--- the settings page's switch off: every station gone (its refuel prompt too), new records ignored; on again: the
--- server's re-sent tiles bring them back
-G.onRows(1, '1:3_3', { rec('sw') }); G.update(gov)
-T.check(G.count() == 1, 'a station before the switch')
-G.setEnabled(false)
-T.check(G.count() == 0 and count('TSStatic') == 0 and count('BeamNGGameplayArea') == 0, 'off: gone')
-local offEls = {}
-G.pois('beamng_earth', offEls)
-T.check(#offEls == 0, 'off: no refuel POIs')
-G.onRows(1, '1:3_3', { rec('sw') }); G.update(gov)
-T.check(G.count() == 0, 'off: records ignored')
-G.prewarm({ '/x/off.dae' })
-T.check(count('TSStatic') == 0, 'off: nothing preloaded')
-G.setEnabled(true)
-G.onRows(1, '1:3_3', { rec('sw') }); G.update(gov)
-T.check(G.count() == 1, 'on again: made from the re-sent tile')
 G.reset()
 
 -- the region's shapes (the server's anchor_ready fuelShapes; only that region's, a Steam Deck's memory) loaded once,

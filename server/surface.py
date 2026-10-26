@@ -30,6 +30,7 @@ import fast
 import mapgeom
 import heightmap
 import mapcells
+import revisit
 import roads as roadsmod
 import staging
 
@@ -849,6 +850,7 @@ class Surface:
             if not self.md.has(key, "roads"):
                 self._queue(key, ("roads",))
                 complete = False
+                revisit.fault()             # (left out: nothing built now is kept)
                 continue
             try:
                 out.append(self.md.cell(key, layers=("roads",), kind="background").layers.get("roads"))
@@ -907,6 +909,7 @@ class Surface:
             for layer in ("infrastructure", "land_use"):
                 if not self.md.has(key, layer):
                     self._queue(key, (layer,))
+                    revisit.fault()         # (left out: nothing built now is kept)
                     continue
                 try:
                     out.append(self.md.cell(key, layers=(layer,), kind="background").layers.get(layer))
@@ -933,6 +936,8 @@ class Surface:
                 continue
             if r is None:
                 complete = complete and not self._is_queued(key)
+                if not complete:
+                    revisit.fault()         # (not cached yet: nothing built now is kept)
                 continue
             out[inside] = r.sample(lon[inside], lat[inside])
         out[np.abs(lat) > mapcells.MAX_LAT] = POLAR_CLASS

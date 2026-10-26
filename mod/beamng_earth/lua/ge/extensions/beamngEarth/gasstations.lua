@@ -16,7 +16,7 @@ M.CLEAR_S = 0.5            -- the POI list gathered again at most this often (s)
 M.ENERGY = { 'gasoline', 'diesel' }
 M.now = os.clock
 M.onCollide = nil          -- called once per spawned station (core: the collision rebuild, batched with the roads')
-M.enabled = true           -- the settings page's "Gas stations" switch (setEnabled)
+M.enabled = true           -- (always on: the settings page's switch was removed, the user 2026-10-25; tests turn it off)
 
 local stations = {}        -- id -> { rec, keys = { [tile key] = true }, objs = { { id, pos, q } }, pumps, made }
 local queue = {}           -- station ids to spawn
@@ -239,20 +239,6 @@ function M.prewarm(shapes)
       if not ok then log('W', 'beamngEarth', 'gas stations: prewarm ' .. shape .. ': ' .. tostring(err)) end
     end
   end
-end
-
--- The settings page's switch (the user, 2026-10-23: "build that switch!"; off saves their cost on a small machine):
--- off, every station goes (its refuel prompt with it) and records are ignored until it is on again; core tells the
--- server (gas_stations), which then lays none out and sends the road tiles again.
-function M.setEnabled(on)
-  on = on and true or false
-  if on == M.enabled then return false end
-  M.enabled = on
-  if not on then
-    M.reset()
-    poisDirty = true           -- (the stock POI list gathered again: without ours)
-  end
-  return true
 end
 
 function M.count()

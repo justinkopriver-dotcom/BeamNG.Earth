@@ -4,13 +4,16 @@ Overture's rail segments (subtype "rail", in the roads layer; each OSM way one t
 ranges left out) as draped chunks of the road tile: on open ground a ballast bed, the sleepers across it and two rails;
 where the track runs on a carriageway (a street tram, a level crossing) West Coast USA's street track instead: its
 road_tramline decal, both rails in one 1.8 m ribbon (textureLength 30, as in its DecalRoads). Standard gauge. Flat: no
-collision, as the markings. Subways and the rail classes Overture leaves unknown are left out.
+collision, as the markings. Subways are left out.
+The classes railways.py builds as a colliding 3D track on the ground and on bridges (standard and narrow gauge, light
+rail, unknown: mpsteppe's PR #287) get only their street track here, where they cross a carriageway (railways.py stops
+its track at the road's edge); trams get it all.
 """
 import math
 
 import numpy as np
 
-KINDS = {"standard_gauge": "rail", "narrow_gauge": "narrow", "light_rail": "tram", "tram": "tram"}
+KINDS = {"standard_gauge": "rail", "narrow_gauge": "narrow", "light_rail": "tram", "tram": "tram", "unknown": "rail"}
 GAUGE_M = {"rail": 1.435, "narrow": 1.0, "tram": 1.435}
 HEAD_M = 0.075                  # a rail head's width; the rail lines lie half of it outside the gauge
 TRACK = {                       # ballast top width, sleeper length, sleeper width, sleeper spacing (m)
@@ -36,7 +39,15 @@ def _chunk(look, w, pts):
 
 def _enu(frame, ll):
     e, n, _ = frame.geodetic_to_enu(ll[:, 1], ll[:, 0], np.zeros(len(ll)))
-    return np.c_[e, n]
+    return np.stack([np.asarray(e, np.float64), np.asarray(n, np.float64)], axis=1)
+
+
+def _lonlat_box(frame, box, m):
+    """(lon0, lat0, lon1, lat1) round the frame box (x0, y0, x1, y1) grown by m, and 100 m more (the frame's axes turn
+    against the meridians away from its origin): every point within m of the box lies inside it."""
+    x0, y0, x1, y1 = box[0] - m - 100.0, box[1] - m - 100.0, box[2] + m + 100.0, box[3] + m + 100.0
+    la, lo, _ = frame.enu_to_geodetic(np.array([x0, x1, x0, x1]), np.array([y0, y0, y1, y1]), 0.0)
+    return float(np.min(lo)), float(np.min(la)), float(np.max(lo)), float(np.max(la))
 
 
 def _near(xy, box, m):
@@ -87,23 +98,58 @@ def _sleepers(xy, s, step, length, box, on_road):
     return list(zip(c[keep] - n, c[keep] + n))
 
 
+CROSS_WINDOW_M = 30.0           # m of track either side of where it crosses a carriageway's centre line (_crossing_windows)
+
+
+def _crossing_windows(xy, lines):
+    """The stretches of track xy (k, 2) within CROSS_WINDOW_M of where it crosses a carriageway centre line (lines),
+    overlapping ones joined: [(k, 2)]. Pure."""
+    import roads
+    cr = roads._crossings([xy], lines) if lines else []
+    if not cr:
+        return []
+    s = np.r_[0.0, np.cumsum(np.hypot(*np.diff(xy, axis=0).T))]
+    spans = []
+    for arc in sorted(c[1] for c in cr):
+        a, b = max(0.0, arc - CROSS_WINDOW_M), min(float(s[-1]), arc + CROSS_WINDOW_M)
+        if spans and a <= spans[-1][1]:
+            spans[-1][1] = b
+        else:
+            spans.append([a, b])
+    out = []
+    for a, b in spans:
+        inner = xy[(s > a) & (s < b)]
+        out.append(np.vstack([[np.interp(a, s, xy[:, 0]), np.interp(a, s, xy[:, 1])], inner,
+                              [np.interp(b, s, xy[:, 0]), np.interp(b, s, xy[:, 1])]]))
+    return out
+
+
 def tile_chunks(frame, tx, ty, cells):
     """The track chunks of road tile (tx, ty) (anchor frame): ballast, sleepers, then the rails (material order: the
     road mesh draws them in that order). cells: the roads Features of the cells touching the tile."""
+    import railways
     import roads
     box = roads.tile_bbox(tx, ty)
     reach = max(t[0] for t in TRACK.values()) + MARGIN_M
     carriageways, tracks, seen = {}, [], set()
+    llb = _lonlat_box(frame, box, reach + 20.0)
     for feats in cells:
         if feats is None or len(feats) == 0 or "subtype" not in feats.attrs:
             continue
         sub, cls = feats.attrs["subtype"], feats.attrs["class"]
+        fb = roads._feature_boxes(feats)        # (lon0, lat0, lon1, lat1) per feature
+        far = (fb[:, 2] < llb[0]) | (fb[:, 0] > llb[2]) | (fb[:, 3] < llb[1]) | (fb[:, 1] > llb[3])
         specs = None
         for i in range(len(feats)):
             fid = str(feats.ids[i])
             if fid in seen:
                 continue
             kind = KINDS.get(str(cls[i])) if str(sub[i]) == "rail" else None
+            # the classes railways.py builds as a 3D track (mpsteppe's PR #287): only where they cross a carriageway
+            # (its street track across the road, which railways.py leaves to the road), nothing on open ground
+            meshed = str(sub[i]) == "rail" and str(cls[i]) in railways.DRAWN
+            if meshed and railways._gone(feats, i):
+                continue
             if str(sub[i]) == "road":
                 if specs is None:
                     specs = roads.road_specs(feats)
@@ -112,6 +158,9 @@ def tile_chunks(frame, tx, ty, cells):
             elif kind is None:
                 continue
             seen.add(fid)
+            if far[i]:
+                continue                        # (no part of it near the tile: converting each to find that out was
+                                                # most of this, 2026-10-25)
             for k, part in enumerate(roads.ground_parts(feats, i)):
                 xy = _enu(frame, np.asarray(part, np.float64))
                 if len(xy) < 2 or not _near(xy, box, reach + 20.0):
@@ -119,7 +168,7 @@ def tile_chunks(frame, tx, ty, cells):
                 if kind is None:
                     carriageways[(fid, k)] = (xy, specs[i].width / 2)
                 else:
-                    tracks.append((kind, xy))
+                    tracks.append((kind, xy, meshed))
     if not tracks:
         return []
 
@@ -127,12 +176,21 @@ def tile_chunks(frame, tx, ty, cells):
         return roads._on_carriageways(pts, carriageways, -ON_ROAD_INSET_M)
 
     ballast, sleepers, rails = [], [], []
-    for kind, xy in tracks:
+    cw_lines = [ln for ln, _hw in carriageways.values()]
+    todo = []
+    for kind, xy, meshed in tracks:
+        if meshed and kind != "tram":
+            # (a main line's only street track is where it crosses a road: just those stretches, every metre of every
+            # line in reach tested against every carriageway cost a tile ~0.1 s, 2026-10-25)
+            todo += [(kind, w, meshed) for w in _crossing_windows(xy, cw_lines)]
+        else:
+            todo.append((kind, xy, meshed))
+    for kind, xy, meshed in todo:
         bw, sl, sw, step = TRACK[kind]
         off = GAUGE_M[kind] / 2 + HEAD_M / 2
         full = roads.densify(xy, SAMPLE_M)
         s = np.r_[0.0, np.cumsum(np.hypot(*np.diff(full, axis=0).T))]
-        for a, b in _sleepers(full, s, step, sl, box, on_road):
+        for a, b in (() if meshed else _sleepers(full, s, step, sl, box, on_road)):
             sleepers.append(_chunk(SLEEPER, sw, (a, b)))
         for piece in roads.clip_polyline(full, box[0] - MARGIN_M, box[1] - MARGIN_M, box[2] + MARGIN_M,
                                          box[3] + MARGIN_M):
@@ -145,6 +203,8 @@ def tile_chunks(frame, tx, ty, cells):
                     continue
                 if street:
                     rails.append(_chunk(STREET_TRACK, STREET_TRACK["w"], run))
+                    continue
+                if meshed:
                     continue
                 ballast.append(_chunk(BALLAST, bw, run))
                 for side in (off, -off):

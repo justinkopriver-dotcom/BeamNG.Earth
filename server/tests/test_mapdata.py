@@ -800,6 +800,24 @@ class CacheTest(Sources, SmallBlocks, unittest.TestCase):
         with self.assertRaises(netfetch.Offline):
             md3.cell(mapcells.cell_of(10.0, 10.0), ("landcover",))
 
+    def test_warm_builds_ahead(self):
+        # warm() builds the asked (cell, layer)s into the cache in the background; the cell() after it reads them back
+        # without fetching, and what is cached or queued is not queued again
+        md, t = self.mapdata()
+        with mock.patch.object(mapdata, "WARM_THREADS", 0):
+            self.assertEqual(md.warm([(mf.CELL, "roads")]), 0, "few CPUs: nothing ahead")
+        with mock.patch.object(mapdata, "WARM_THREADS", 2):
+            self.assertEqual(md.warm([(mf.CELL, "roads"), (mf.CELL, "water"), (mf.CELL, "roads")]), 2)
+        md._warm_ex.shutdown(wait=True)
+        self.assertTrue(md.has(mf.CELL, "roads") and md.has(mf.CELL, "water"))
+        n = t.count()
+        cd = md.cell(mf.CELL, ("roads", "water"))
+        self.assertTrue(all(s["hit"] for s in cd.stats.values()))
+        self.assertEqual(t.count(), n)
+        with mock.patch.object(mapdata, "WARM_THREADS", 2):
+            self.assertEqual(md.warm([(mf.CELL, "roads")]), 0)
+        self.assertEqual(md._warming, set())
+
     def test_a_deferred_osm_prefetch_is_not_cached(self):
         # the OSM tags' host had no room for a prefetch: the roads are not built (prefetch False) rather than cached for
         # good without their tags; on demand they are built without them
