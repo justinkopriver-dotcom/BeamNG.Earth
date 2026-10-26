@@ -85,6 +85,7 @@ local X = { jobs = require('beamngEarth/jobs'),             -- garage-to-garage 
   dynweather = require('beamngEarth/dynweather'),           -- the week's dynamic weather (dynweather.lua)
   heat = require('beamngEarth/heat'),                       -- police heat: plates remembered, fines, footage (heat.lua)
   garage = require('beamngEarth/garage'),                   -- repair shops and property (garage.lua)
+  worldtraffic = require('beamngEarth/worldtraffic'),       -- the phone's world traffic switch (worldtraffic.lua)
   wallet = require('beamngEarth/wallet'),                   -- the player's money: fuel and tolls (wallet.lua)
   roadweather = require('beamngEarth/roadweather'),         -- rain and snow on the roads: grip and look
   placesResults = {}, jobResults = {}, mediaState = nil, fuelResults = {} }   -- the phone's / map's server answers
@@ -1784,7 +1785,9 @@ local function onUpdate(dtReal, dtSim)
   if st.inOurLevel then pcall(X.roadweather.update) end
   if st.inOurLevel then
     pcall(X.heat.update, dtSim)
-    pcall(X.garage.update)
+    pcall(X.garage.update, dtSim, st.anchor, st.player)
+    local stgP = rawget(_G, 'beamngEarth_settings')
+    pcall(X.worldtraffic.update, dtSim, stgP and stgP.phonePref and stgP.phonePref('traffic'))
     local stg2 = rawget(_G, 'beamngEarth_settings')
     local mins = stg2 and stg2.gameClock and stg2.gameClock() or nil
     pcall(X.dynweather.update, dtSim, mins, st.player and st.player.lat, st.player and st.player.lon)
