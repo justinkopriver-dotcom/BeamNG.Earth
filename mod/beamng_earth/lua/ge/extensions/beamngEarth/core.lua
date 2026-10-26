@@ -67,6 +67,7 @@ local postfx = require('beamngEarth/postfx')       -- no far depth-of-field blur
 local gps = require('beamngEarth/gps')               -- the game's GPS route to a place picked on the world map
 local wallet = require('beamngEarth/wallet')         -- the player's money: fuel and tolls (wallet.lua)
 local jobs = require('beamngEarth/jobs')             -- garage-to-garage deliveries (jobs.lua)
+local heat = require('beamngEarth/heat')             -- police heat: plates remembered, fines, footage (heat.lua)
 local roadweather = require('beamngEarth/roadweather') -- rain and snow on the roads: grip and look
 local collisionfoci = require('beamngEarth/collisionfoci') -- other vehicles' collision islands
 local terrainpatch = require('beamngEarth/terrainpatch')   -- ground under the islands off the terrain block
@@ -1661,6 +1662,7 @@ local function onUpdate(dtReal, dtSim)
   if st.inOurLevel then pcall(wallet.update, st.anchorId, st.player and st.player.x, st.player and st.player.y) end
   if st.inOurLevel then pcall(roadweather.update) end
   if st.inOurLevel then
+    pcall(heat.update, dtSim)
     local okJ, errJ = pcall(jobs.update, dtSim, st.anchor, st.player)
     if not okJ then log('W', 'beamngEarth', 'jobs: ' .. tostring(errJ)) end
   end
@@ -2247,6 +2249,9 @@ M.onUiChangedState = onUiChangedState
 M.onClientStartMission = onClientStartMission
 M.onClientPreStartMission = onClientPreStartMission
 M.onNavgraphReloaded = function() navgraph.onReloaded() end
+M.onPursuitAction = function(id, action, data)      -- (the stock police: start, evade, arrest)
+  if st.inOurLevel then pcall(heat.onPursuitAction, id, action, data) end
+end
 M.onVehicleMapmgrUpdate = function(id) gps.onVehicleMapmgrUpdate(id) end
 M.onClientEndMission = onClientEndMission
 M.onClientPostStartMission = onClientPostStartMission
