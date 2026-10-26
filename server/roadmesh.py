@@ -679,10 +679,15 @@ def parapet_runs(chunks, context=(), _rb=None, ground=()):
     cr = [r for r in ribbons(list(context)) if r[5] is not None]
     cov_ctx = [(r, c) for r, c in zip(cr, context)] + _ground_carriageways(list(chunks) + list(ground))
     covered = _parapet_cover([(r, c) for r, c in rb], cov_ctx)
+    # (upstream 1.6.3: no parapet across a median to a twin deck beside it, as deck() leaves out)
+    medians = _median_gaps([(r, c) for r, c in rb],
+                           [(r, c) for r, c in zip(ribbons(list(context)), context) if r[5] is not None])
     out = []
     for n, ((left, right, v, _m, _layer, z), c) in enumerate(rb):
         if c.get("tunnel"):       # deck() draws the tunnel floor without parapets
             continue
+        gl, gr = medians[n]
+        covered[n] = (covered[n][0] | (gl > 0), covered[n][1] | (gr > 0))
         lat = left - right
         u = lat / np.maximum(np.hypot(lat[:, 0], lat[:, 1]), 1e-9)[:, None]
         el, er = left + u * PARAPET_W, right - u * PARAPET_W
