@@ -21,8 +21,12 @@ This fork only adds a **gameplay layer** on top of it. The list below is what we
 - Music: play, pause and skip desktop Spotify, with a volume slider for Spotify only (the game's sound is untouched)
 - Settings: wallpaper (your screenshots), theme, size, and a world-traffic switch (15 cars, 2 of them police)
 
+<img src="docs/fork/phone-home.jpg" alt="The phone home screen" width="640">
+
 **Money**
 - A saved wallet: fuel at the gas stations and tolls cost money, and jobs, rally prizes and sales pay
+
+<img src="docs/fork/bank.jpg" alt="The Bank app: balance and recent activity" width="640">
 
 **Jobs**
 - Car deliveries between real garages, and truck freight between real depots in a rented semi with a loaded trailer
@@ -31,13 +35,19 @@ This fork only adds a **gameplay layer** on top of it. The list below is what we
   parked as it is (fuel, damage) and handed back at the end
 - Pay grows with distance; bonuses for no damage, a clean record and a delivery streak; tolls and fuel paid back
 
+<img src="docs/fork/jobs.jpg" alt="Car and truck jobs near me, with pickup distances" width="640">
+
 **Beamazon**
 - Parcel van routes of 10, 20, 35 or 60 stops from real depots to residential streets, in their own app
+
+<img src="docs/fork/beamazon.jpg" alt="Beamazon parcel routes near me" width="640">
 
 **Garage & Real Estate**
 - Real repair shops: repairs, parts billed at the part's value, plates, respray
 - Property to buy, rent or sell, with car storage; a blue ring at each place opens its menu, with a workbench and
   laptop against the building's wall
+
+<img src="docs/fork/garage.jpg" alt="Repair shops near me" width="420"> <img src="docs/fork/realestate-forsale.jpg" alt="Property for sale and rent" width="420"> <img src="docs/fork/realestate-mine.jpg" alt="Your properties" width="420">
 
 **Rally**
 - Real Susquehannock Trail Performance Rally stages near Wellsboro, PA (Asaph, Painter), built from the named
@@ -56,6 +66,8 @@ This fork only adds a **gameplay layer** on top of it. The list below is what we
 - Dynamic weather: a weekly forecast for each ~50 km region, changing through the day; grip and a wet or snowy road
   look follow the rain and snow
 - The phone shows when the weather is paused (set to manual by the menu or another mod) and turns it back on
+
+<img src="docs/fork/weather.jpg" alt="The weather app: today and the 7-day forecast" width="640">
 
 **Roads, signs & GPS**
 - US signs: speed limits, curve warnings, advisory plaques, chevrons, mileposts, county lines
