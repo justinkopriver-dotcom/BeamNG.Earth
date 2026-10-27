@@ -80,6 +80,16 @@ gasstations.onCollide = roads.markCollisionDirty
 local navgraph = require('beamngEarth/navgraph')
 local postfx = require('beamngEarth/postfx')       -- no far depth-of-field blur in our level
 local gps = require('beamngEarth/gps')               -- the game's GPS route to a place picked on the world map
+-- (my-features modules in one table: core.lua is at Lua's 200-locals limit)
+local X = { jobs = require('beamngEarth/jobs'),             -- garage-to-garage and truck deliveries (jobs.lua)
+  dynweather = require('beamngEarth/dynweather'),           -- the week's dynamic weather (dynweather.lua)
+  heat = require('beamngEarth/heat'),                       -- police heat: plates remembered, fines, footage (heat.lua)
+  garage = require('beamngEarth/garage'),                   -- repair shops and property (garage.lua)
+  worldtraffic = require('beamngEarth/worldtraffic'),       -- the phone's world traffic switch (worldtraffic.lua)
+  wallet = require('beamngEarth/wallet'),                   -- the player's money: fuel and tolls (wallet.lua)
+  roadweather = require('beamngEarth/roadweather'),         -- rain and snow on the roads: grip and look
+  rally = require('beamngEarth/rally'), rallyResults = {},  -- the Rally app's stages (rally.lua)
+  placesResults = {}, jobResults = {}, mediaState = nil, fuelResults = {} }   -- the phone's / map's server answers
 local collisionfoci = require('beamngEarth/collisionfoci') -- other vehicles' collision islands
 local terrainpatch = require('beamngEarth/terrainpatch')   -- ground under the islands off the terrain block
 local farcars = require('beamngEarth/farcars')             -- far player cars saved, taken out and put back
@@ -883,8 +893,14 @@ local function onMessage(msg)
     farfield.onRetex(msg) -- a shown tile's re-rendered texture (--colormatch / --deshadow)
   elseif t == 'weather' then
     -- real weather (server weather.py): applied by the separate beamngEarth_weather extension
+    -- (dynamic weather, dynweather.lua: kept as the climate; the sky's clock still takes its UTC offset)
     local w = rawget(_G, 'beamngEarth_weather')
-    if w and w.onWeather then w.onWeather(msg) end
+    if X.dynweather.onRealWeather(msg) then
+      if w and w.onWeather then w.onWeather(msg) end
+    else
+      local sk, off = rawget(_G, 'beamngEarth_sky'), tonumber(msg.utcOffsetS)
+      if sk and sk.setRealUtcOffset and off then pcall(sk.setRealUtcOffset, off / 3600, tonumber(msg.lat), tonumber(msg.lon)) end
+    end
   elseif t == 'gravity' then
     -- real gravity at the player (server gravity.py): applied by beamngEarth_weather's setGravity path
     local w = rawget(_G, 'beamngEarth_weather')
@@ -936,6 +952,17 @@ local function onMessage(msg)
     gps.onRouteDownload(msg)
   elseif t == 'geocode_result' then
     if msg.id then geocodeResults[msg.id] = { results = msg.results or {}, error = msg.error } end
+  elseif t == 'places_near_result' then
+    if msg.id then X.placesResults[msg.id] = msg end
+  elseif t == 'media_state' then
+    X.mediaState = msg
+  elseif t == 'rally_stage_result' then
+    if msg.id then X.rallyResults[msg.id] = msg end       -- (rally.lua polls it)
+  elseif t == 'delivery_jobs_result' then
+    if msg.id then X.jobResults[msg.id] = msg end         -- (jobs.lua polls it)
+  elseif t == 'nearest_fuel_result' then
+    -- the gas station nearest the player (server fuelfind.py): settings.uiNearestFuelResult teleports there
+    if msg.id then X.fuelResults[msg.id] = msg end
   elseif t == 'map_tiles_ready' then
     -- a world map tile file is written (settings.mapTiles: the map polls every 250 ms while it misses tiles)
   elseif t == 'navgraph' then
@@ -1487,7 +1514,7 @@ end
 -- releases page (hidden for this session) or dismisses it (hidden until a newer version; settings updateDismissed). It was
 -- a 15 s toast (the user, 2026-10-18: "Make it persistant and add a dismiss buttion or a buttion to open the releases
 -- page").
-M.RELEASES_URL = 'https://github.com/TecnaGamer/BeamNG.Earth/releases/latest'
+M.RELEASES_URL = 'https://github.com/justinkopriver-dotcom/BeamNG.Earth/releases/latest'   -- (the my-features fork's)
 local function drawUpdateNotice()
   if updateHidden or not updateInfo or settings.get('updateDismissed') == tostring(updateInfo.latest) then return end
   local im = ui_imgui
@@ -1757,6 +1784,21 @@ local function onUpdate(dtReal, dtSim)
   local stg = rawget(_G, 'beamngEarth_settings')
   if stg and stg.redirectBigMap then stg.redirectBigMap(st.inOurLevel) end
   if st.inOurLevel then gps.update(st.anchor, st.player) end
+  if st.inOurLevel then pcall(X.wallet.update, st.anchorId, st.player and st.player.x, st.player and st.player.y) end
+  if st.inOurLevel then pcall(X.roadweather.update) end
+  if st.inOurLevel then
+    pcall(X.heat.update, dtSim)
+    pcall(X.garage.update, dtSim, st.anchor, st.player)
+    local stgP = rawget(_G, 'beamngEarth_settings')
+    pcall(X.worldtraffic.update, dtSim, stgP and stgP.phonePref and stgP.phonePref('traffic'))
+    local stg2 = rawget(_G, 'beamngEarth_settings')
+    local mins = stg2 and stg2.gameClock and stg2.gameClock() or nil
+    pcall(X.dynweather.update, dtSim, mins, st.player and st.player.lat, st.player and st.player.lon)
+    local okJ, errJ = pcall(X.jobs.update, dtSim, st.anchor, st.player)
+    if not okJ then log('W', 'beamngEarth', 'jobs: ' .. tostring(errJ)) end
+    local okR, errR = pcall(X.rally.update, dtSim, st.anchor, st.player)
+    if not okR then log('W', 'beamngEarth', 'rally: ' .. tostring(errR)) end
+  end
   seasonlook.update(st.inOurLevel, st.anchor and st.anchor.lat)
   t = mark('ui', t)
   local frameMs = frameMs0
@@ -1894,6 +1936,7 @@ end
 -- After physics, before rendering (main.lua:819-824): measure when a rebase's vehicle move became
 -- visible. Hook order relative to core_camera does not matter here; this only measures.
 local function onPreRender(dtReal, dtSim)
+  pcall(X.rally.preRender)                 -- (the rally's ground line: decals go in at pre-render)
   local probe = st.lagProbe
   if not probe then return end
   if moveVisible(probe) then
@@ -1995,6 +2038,9 @@ local function onClientEndMission()
   postfx.restore()
   pcall(terrainpatch.clear)
   pcall(gasstations.reset)
+  pcall(X.wallet.resetTolls)
+  pcall(X.roadweather.restore)
+  pcall(function() require('beamngEarth/aitune').reset() end)
   pcall(farcars.reset)
   pcall(mpsession.reset)
   gps.reset()
@@ -2295,6 +2341,53 @@ function M.requestGeocode(id, q, lat, lon)
   net.send({ type = 'geocode', id = id, q = q, lat = lat, lon = lon })
   return true
 end
+-- The world map's "Nearest gas station": the answer is nearest_fuel_result (takeNearestFuel).
+function M.requestPlacesNear(id, lat, lon, kind)
+  if not net.isConnected() then return false end
+  net.send({ type = 'places_near', id = id, lat = lat, lon = lon, kind = kind })
+  return true
+end
+function M.takePlacesNear(id)
+  local r = X.placesResults[id]
+  X.placesResults[id] = nil
+  return r
+end
+function M.requestMedia(action, volume)
+  if not net.isConnected() then return false end
+  net.send({ type = 'media', id = 1, action = action, volume = tonumber(volume) })
+  return true
+end
+function M.mediaState() return X.mediaState end
+function M.requestDeliveryJobs(id, lat, lon, seed, kind)
+  if not net.isConnected() then return false end
+  net.send({ type = 'delivery_jobs', id = id, lat = lat, lon = lon, seed = seed, kind = kind })
+  return true
+end
+function M.requestRallyStage(id, stage)
+  if not net.isConnected() then return false end
+  net.send({ type = 'rally_stage', id = id, stage = stage })
+  return true
+end
+function M.takeRallyStage(id)
+  local r = X.rallyResults[id]
+  X.rallyResults[id] = nil
+  return r
+end
+function M.takeDeliveryJobs(id)
+  local r = X.jobResults[id]
+  X.jobResults[id] = nil
+  return r
+end
+function M.requestNearestFuel(id, lat, lon)
+  if not net.isConnected() then return false end
+  net.send({ type = 'nearest_fuel', id = id, lat = lat, lon = lon })
+  return true
+end
+function M.takeNearestFuel(id)
+  local r = X.fuelResults[id]
+  X.fuelResults[id] = nil
+  return r
+end
 function M.requestRoute(id, lat0, lon0, lat1, lon1, bearing)
   if not net.isConnected() then return false end
   net.send({ type = 'route', id = id, lat0 = lat0, lon0 = lon0, lat1 = lat1, lon1 = lon1, bearing = bearing })
@@ -2336,6 +2429,9 @@ M.onUiChangedState = onUiChangedState
 M.onClientStartMission = onClientStartMission
 M.onClientPreStartMission = onClientPreStartMission
 M.onNavgraphReloaded = function() navgraph.onReloaded() end
+M.onPursuitAction = function(id, action, data)      -- (the stock police: start, evade, arrest)
+  if st.inOurLevel then pcall(X.heat.onPursuitAction, id, action, data) end
+end
 M.onVehicleMapmgrUpdate = function(id) gps.onVehicleMapmgrUpdate(id) end
 M.onClientEndMission = onClientEndMission
 M.onExit = function() notePlayerPos(true) end           -- the game closing (a crash or a kill: the last periodic one)

@@ -478,6 +478,14 @@ def _roads_tile(aid, lat, lon, zoom, tx, ty, out_dir, vfs_dir, sidewalks, lift, 
     props = [] if buildings else None
     lines = [] if buildings else None
     wires = [] if buildings else None
+    guide = [] if buildings else None
+    divisions = []                      # county outlines for the county line signs (guidesigns.py); none offline
+    if buildings:
+        try:
+            divisions = [_s.md.cell(k, layers=("divisions",), kind="demand").layers.get("divisions")
+                         for k in roadsmod.cells_of_tile(frame, tx, ty)]
+        except Exception as e:      # an unreachable source costs the county signs, not the tile
+            log.debug("county outlines of road tile %d_%d: %s", tx, ty, e)
     park = [] if buildings else None
     items = town = None
     if buildings:
@@ -498,7 +506,7 @@ def _roads_tile(aid, lat, lon, zoom, tx, ty, out_dir, vfs_dir, sidewalks, lift, 
     cover = []                          # the ground carriageways for the decks' parapets (roadmesh.deck ground=)
     chunks = roadsmod.build_tile(frame, tx, ty, cells, elev, urban, walks=walks, deck_context=ctx, bridges=bridges, widths=_s.widths,
                                  walk_cuts=fuel_cuts,    # (the stations' made-up driveways: no sidewalk across them)
-                                 props=props, lines=lines, wires=wires, town=town, park=park,
+                                 props=props, lines=lines, wires=wires, town=town, park=park, guide=guide, divisions=divisions,
                                  left_hand=left_hand, mph=mph, structures=buildingsmod.centres(items, tx, ty) if items else (),
                                  tunnels=tunnels, walls=rwalls,
                                  ground=lambda x, y: roadmeshmod.drawn_ground(frame, drawn, np.c_[x, y], q),
@@ -521,10 +529,31 @@ def _roads_tile(aid, lat, lon, zoom, tx, ty, out_dir, vfs_dir, sidewalks, lift, 
             import gasstations
             park = gasstations.clear_park(park, fuel)
         buildingsmod.brick_walks(walks, items, lat, lon)
+
+    # Share the bridge mesh's exact parapet geometry with the tile builder.
+    # Mapped rails on a deck are replaced by guardrails.bridge_rows(); the parapet runs also feed the fallback matching.
+    parapets = roadmeshmod.parapet_runs(chunks, ctx, ground=cover)
+    import guardrails as guardrailsmod
+    infra_fn = lambda key: _s.md.cell(key, layers=("infrastructure",), kind="demand").layers.get("infrastructure")
+    low_parapet_decks = set()
+    try:
+        guardrail_decks = [{"n": np.column_stack((xy, z)), "w": spec.width}
+                           for _fid, spec, xy, z, _lon in bridges.parts(
+                               cells, (box[0]-10, box[1]-10, box[2]+10, box[3]+10))]
+        guardrail_rows = guardrailsmod.forest_rows(frame, infra_fn, box, elev,
+                                                   decks=guardrail_decks, parapets=parapets,
+                                                   bridge_rails=roadmeshmod.BRIDGE_RAILS,
+                                                   supported_decks_out=low_parapet_decks)
+    except Exception as ex:
+        log.warning("mapped guardrails: tile %s_%s: %s: %s", tx, ty, type(ex).__name__, ex)
+        # A failed mapped-data pass cannot establish that a bridge needs rails.
+        low_parapet_decks.clear()
+        guardrail_rows = []
     mesh = roadmeshmod.build(frame, chunks, elev, (x0, y0, 0.0), lift, clip=box, follow=True, q=q, drawn=drawn)
     mesh = _with_plazas(mesh, frame, tx, ty, elev, (x0, y0, 0.0), getattr(_s, "surface", None))
     dmesh = roadmeshmod.deck(chunks, (x0, y0, 0.0), bridges.piers_in(roadsmod.tile_bbox(tx, ty)), ctx,
-                              bridges.beams_in(roadsmod.tile_bbox(tx, ty)), ground=cover)
+                              bridges.beams_in(roadsmod.tile_bbox(tx, ty)), parapets=parapets,
+                              low_parapet_decks=low_parapet_decks, ground=cover)
     tmesh = roadmeshmod.tunnel(chunks, (x0, y0, 0.0), rwalls)
     import railways
     rmesh = railways.tile_mesh(frame, tx, ty,
@@ -538,7 +567,8 @@ def _roads_tile(aid, lat, lon, zoom, tx, ty, out_dir, vfs_dir, sidewalks, lift, 
         import buildings as buildingsmod
         bld = buildingsmod.road_tile(frame, tx, ty, _s.md, elev, None, None, items)
     return roadsmod.write_tile(out_dir, vfs_dir, aid, tx, ty, chunks, walks if sidewalks else None, mesh, dmesh,
-                               bld, props, wires, park, tunnel_mesh=tmesh, fuel=fuel, rail_mesh=rmesh) + (fuel_pads,)
+                               bld, props, wires, park, tunnel_mesh=tmesh, fuel=fuel,
+                               guardrail_rows=guardrail_rows, guide=guide, rail_mesh=rmesh) + (fuel_pads,)
 
 
 def _with_plazas(mesh, frame, tx, ty, elev, origin, surface):

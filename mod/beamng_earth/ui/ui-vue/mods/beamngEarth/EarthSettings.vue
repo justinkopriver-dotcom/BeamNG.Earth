@@ -407,7 +407,7 @@ function infoValue(item) {
   if (item.id === "player") return (typeof s.playerLat === "number") ? `${fmt(s.playerLat, 5)}, ${fmt(s.playerLon, 5)}  (${fmt(s.dist / 1000, 1)} km from origin)` : "-"
   if (item.id === "attribution") return s.attribution || "-"
   if (item.id === "credits") return s.credits || "-"
-  if (item.id === "reportPost") return "github.com/TecnaGamer/BeamNG.Earth/issues"
+  if (item.id === "reportPost") return "github.com/justinkopriver-dotcom/BeamNG.Earth/issues"
   if (item.id === "weather") return s.weather || "-"
   if (item.id === "gravity") return s.gravity || "-"
   if (item.id === "deshadow") return s.deshadow || "off"

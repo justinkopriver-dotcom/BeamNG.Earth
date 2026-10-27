@@ -13,8 +13,11 @@ import sys
 
 import netfetch
 
-REPO = "TecnaGamer/BeamNG.Earth"
-VERSION_URL = f"https://raw.githubusercontent.com/{REPO}/main/VERSION"
+# (the my-features fork: its updates come from the fork's own releases and its my-features branch, not
+# TecnaGamer's: an upstream release installed over it would take the fork's features away)
+REPO = "justinkopriver-dotcom/BeamNG.Earth"
+BRANCH = "my-features"
+VERSION_URL = f"https://raw.githubusercontent.com/{REPO}/{BRANCH}/VERSION"
 PAGE_URL = f"https://github.com/{REPO}/releases"      # the downloads (.exe / AppImage)
 # the folder with VERSION: above server/, or the packaged app's bundle (launcher.py frozen by PyInstaller, where
 # every module sits at the bundle's top)
