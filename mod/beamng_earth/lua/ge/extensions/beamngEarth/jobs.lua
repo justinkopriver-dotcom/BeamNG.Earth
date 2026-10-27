@@ -257,16 +257,25 @@ end
 -- The delivery bays (the user: "the same feature as career where you have a spot to pull into"): a green bay drawn at
 -- the pickup and at each drop-off; you are there when stopped inside it.
 M.BAY_M = 5.0
+-- (performance: the bay's ground height looked up once per place and anchor, not a ground ray every frame)
+-- (refreshed every Z_REFRESH_S: the ground may still have been loading when it was first measured)
+M.Z_REFRESH_S = 1.0
+local bayZ = { place = nil, anchor = nil, z = nil, t = -math.huge }
 local function drawBay(anchor, place, player)
   local dd = rawget(_G, 'debugDrawer')
   if not (dd and place and player) then return end
   local x, y = anchor:geodeticToEnu(place.lat, place.lon, 0)
   if (x - player.x) ^ 2 + (y - player.y) ^ 2 > 250 ^ 2 then return end
   pcall(function()
-    local z = player.z or 0
-    local be_ = rawget(_G, 'be')
-    local okz, h = pcall(function() return be_:getSurfaceHeightBelow(vec3(x, y, z + 20)) end)
-    if okz and tonumber(h) and h > -1e6 then z = h end
+    local now = os.clock()
+    if bayZ.place ~= place or bayZ.anchor ~= anchor or not bayZ.z or now - bayZ.t > M.Z_REFRESH_S then
+      local z = player.z or 0
+      local be_ = rawget(_G, 'be')
+      local okz, h = pcall(function() return be_:getSurfaceHeightBelow(vec3(x, y, z + 20)) end)
+      if okz and tonumber(h) and h > -1e6 then z = h end
+      bayZ.place, bayZ.anchor, bayZ.z, bayZ.t = place, anchor, z, now
+    end
+    local z = bayZ.z
     dd:drawCylinder(vec3(x, y, z), vec3(x, y, z + 0.06), M.BAY_M, ColorF(0.2, 0.85, 0.35, 0.4))
   end)
 end

@@ -645,7 +645,11 @@ function M.togglePhone()
   if guihooks then guihooks.trigger('BneEarthPhone', { up = phoneUp }) end
 end
 
+-- (performance: the phone asks every second while it is up; the folders are listed at most every WALLPAPER_S)
+local WALLPAPER_S = 30
+local wallCache, wallT = nil, -math.huge
 local function wallpapers()
+  if wallCache and os.clock() - wallT < WALLPAPER_S then return wallCache end
   local out = {}
   local fs = rawget(_G, 'FS')
   for _, dir in ipairs({ WALLPAPER_DIR, '/screenshots/' }) do
@@ -657,6 +661,7 @@ local function wallpapers()
     end
   end
   table.sort(out, function(a, b) return a > b end)       -- (screenshots: newest first by their dated names)
+  wallCache, wallT = out, os.clock()
   return out
 end
 

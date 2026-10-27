@@ -178,14 +178,16 @@ function M.update(dt)
   coolT = coolT + dt
   if coolT >= 60 then
     local s = load()
+    local any = false
     for _, tbl in ipairs({ s.plates, s.looks }) do
       for k, h in pairs(tbl) do
         local n = (tonumber(h) or 0) - M.COOL * coolT / 60
         tbl[k] = n > 0.05 and n or nil
+        any = true
       end
     end
     coolT = 0
-    save()
+    if any then save() end            -- (performance: no disk write a minute when there is no heat to cool)
   end
   checkT = checkT + dt
   if checkT < 1 or not (police and police.getNearestPoliceVehicle and be_) then return end

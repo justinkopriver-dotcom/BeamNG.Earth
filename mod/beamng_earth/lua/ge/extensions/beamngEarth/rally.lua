@@ -431,7 +431,12 @@ local function drawGate(s, color, z)
   pcall(function()
     for _, sg in ipairs({ 1, -1 }) do
       local gx, gy = x + nx * sg, y + ny * sg
-      local gz = groundZ(gx, gy, z)
+      -- (performance: each post's ground once per projection, not a ground ray every frame)
+      -- (refreshed every second: the ground may still have been loading at the first look)
+      local key = 'gate' .. s .. ':' .. sg
+      local c, now = zCache[key], os.clock()
+      if not c or now - c.t > 1 then c = { z = groundZ(gx, gy, z), t = now }; zCache[key] = c end
+      local gz = c.z
       dd:drawCylinder(vec3(gx, gy, gz), vec3(gx, gy, gz + 3), 0.25, color)
     end
   end)
