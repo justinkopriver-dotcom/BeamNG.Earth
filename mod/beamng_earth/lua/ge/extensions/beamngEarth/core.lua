@@ -1514,7 +1514,7 @@ end
 -- releases page (hidden for this session) or dismisses it (hidden until a newer version; settings updateDismissed). It was
 -- a 15 s toast (the user, 2026-10-18: "Make it persistant and add a dismiss buttion or a buttion to open the releases
 -- page").
-M.RELEASES_URL = 'https://github.com/TecnaGamer/BeamNG.Earth/releases/latest'
+M.RELEASES_URL = 'https://github.com/justinkopriver-dotcom/BeamNG.Earth/releases/latest'   -- (the my-features fork's)
 local function drawUpdateNotice()
   if updateHidden or not updateInfo or settings.get('updateDismissed') == tostring(updateInfo.latest) then return end
   local im = ui_imgui
