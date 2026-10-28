@@ -21,6 +21,10 @@ M.EARLY_BONUS = 0.20
 M.LATE_PER_MIN = 0.02
 M.LATE_MAX = 0.5
 M.DAMAGE_FULL = 15000.0     -- the vehicle's damage (beamstate, ~$) at which the whole pay is lost
+-- ... a truck haul forgives more (the user, 2026-10-28: "the open road just damages beamng vehicles ... leave room for
+-- forgiveness"): the first TRUCK_DMG_FREE + TRUCK_DMG_PER_MI a mile of damage costs nothing, and the whole pay is lost
+-- only at TRUCK_DAMAGE_FULL
+M.TRUCK_DMG_FREE, M.TRUCK_DMG_PER_MI, M.TRUCK_DAMAGE_FULL = 2500.0, 40.0, 40000.0
 M.REQUEST_WAIT_S = 40
 M.TRUCK_WAIT_S = 150        -- (truck searches: far cells, a first download each)
 -- trucking (the user: "just spawn me in the truck and the trailer nearby"; "rent a truck and pay them a small fee each
@@ -82,11 +86,17 @@ function M.payout(job, t, damage, expenses, police, streak)
     late = base * math.min(M.LATE_MAX, M.LATE_PER_MIN * (t - limit) / 60)
   end
   local earned = math.max(0, base + bonus - late)          -- (a wrecked car loses its early bonus too)
-  local dmg = earned * math.min(1, math.max(0, tonumber(damage) or 0) / M.DAMAGE_FULL)
+  local rawDamage = math.max(0, tonumber(damage) or 0)
+  local full, charged = M.DAMAGE_FULL, rawDamage
+  if job.kind == 'truck' then
+    full = M.TRUCK_DAMAGE_FULL
+    charged = math.max(0, rawDamage - M.TRUCK_DMG_FREE - M.TRUCK_DMG_PER_MI * (tonumber(job.dist) or 0) / 1609.344)
+  end
+  local dmg = earned * math.min(1, charged / full)
   local exp = math.max(0, tonumber(expenses) or 0)
   local r = function(v) return math.floor(v * 100 + 0.5) / 100 end
   local spotless = (tonumber(damage) or 0) < M.CLEAN_DMG and base * M.SPOTLESS or 0
-  local whole = 1 - math.min(1, math.max(0, tonumber(damage) or 0) / M.DAMAGE_FULL)    -- (a wreck earns no bonuses)
+  local whole = 1 - math.min(1, charged / full)    -- (a wreck earns no bonuses)
   local record = (not police) and base * M.RECORD * whole or 0
   local sb = base * math.min(M.STREAK_MAX, M.STREAK_STEP * math.max(0, tonumber(streak) or 0)) * whole
   local work = earned - dmg + spotless + record + sb
