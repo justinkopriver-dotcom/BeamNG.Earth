@@ -61,9 +61,9 @@ class GuardrailStockAssetTest(unittest.TestCase):
         self.assertIn("/art/shapes/objects/italy_guardrails_basic_end_ccw", source)
         self.assertNotIn("M.NO_COLLIDE.guardrail = true", source)
         self.assertIn("M.GROUP_MAX_M.guardrail = 4000", source)
-        self.assertIn("m:setColumn(0, vec3(row[9], row[10], row[11]))", source)
-        self.assertIn("local isGuardrail = g and g:sub(1, 9) == 'guardrail'", source)
-        self.assertIn("elseif not rowCap or #t.rows <= rowCap then", source)
+        self.assertIn("m:setColumn(0, vec3(bs[1], bs[2], bs[3]))", source)
+        self.assertIn("if g and g:sub(1, 9) == 'guardrail' then", source)
+        self.assertIn("elseif not rowCap or t.n <= rowCap then", source)
 
 
 class GuardrailForestTest(unittest.TestCase):
