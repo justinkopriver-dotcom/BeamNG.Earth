@@ -76,6 +76,10 @@ the mod that is not on this page is TecnaGamer's and its contributors'.
   GPS minimap, checkpoint splits, and a Reset to road button (+5 s)
 - $100 entry (refunded if you quit before GO); gold, silver and bronze target times pay $800, $400 and $200
 
+<img src="docs/fork/rally.gif" alt="A rally stage: the pacenote arrows on the road" width="560">
+
+<img src="docs/fork/rally.jpg" alt="The Rally app during a stage: timer, targets, and the route on the GPS minimap" width="640">
+
 **Police heat**
 - Forgiving police: a short burst of speed or one rolled stop is let go
 - 1 to 5 stars; your plate and car are remembered; fines by stars, impound at 4 or more
@@ -94,6 +98,8 @@ the mod that is not on this page is TecnaGamer's and its contributors'.
 - Shoulder rumble strips beside the edge line, off crossing roads and bridges
 - A satellite GPS minimap with turn-by-turn, distance, arrival time and the speed limit; a Gas button on the world
   map that takes you to the nearest gas station
+
+<img src="docs/fork/maps.jpg" alt="The Maps app with the speed limit, beside the satellite GPS minimap" width="640">
 
 **Other**
 - A Pennsylvania-style license plate in the parts selector
