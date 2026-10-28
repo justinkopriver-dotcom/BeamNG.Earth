@@ -65,6 +65,9 @@ M.URGENT_GAP_S = 1
 -- rest (on a Steam Deck at 80 mph in Phoenix the import queue grew to 140 behind ~20 ms imports, and an I-10 overpass's
 -- deck turned solid only as the car reached it, behind the sidewalks' and buildings' colliders of the same tiles)
 M.DRIVE_FIRST_M = 400
+M.ROAD_FIRST_M = 800        -- a tile's road mesh (the asphalt and its lines: what the player SEES of the road) is made this much
+                            -- sooner than the sidewalk / collider meshes of tiles as near (the user, 2026-10-27: "the lines on
+                            -- the roads not loading fast enough"; it was made in turn with them)
 -- ... and one the car reaches within URGENT_S (150 m at least) is made at once, whatever the governor's budget (its cost
 -- still charged: what follows waits), one every URGENT_EVERY_FRAMES at most: at ~20 ms an import on a Steam Deck, the
 -- 2-4 ms budget let ~3 a second through, fewer than a city's tiles bring at 80 mph
@@ -897,6 +900,7 @@ function M.nextWalk(q)
     end
     if e.renderOnly or e.what == 'wire' then k = k + 1e6 end
     if e.what == 'deck' or e.what == 'tunnel' then k = math.max(0, k - M.DRIVE_FIRST_M) end
+    if e.what == 'road' then k = math.max(0, k - M.ROAD_FIRST_M) end
     if k < bestKey then best, bestKey = i, k end
   end
   return best

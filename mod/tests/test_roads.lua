@@ -310,6 +310,10 @@ do
   roads.update(gov, 2)
   q = { { key = '2:2_0' }, { key = '2:0_1' } }
   T.check(q[roads.nextWalk(q)].key == '2:0_1', 'standing: the nearer tile first')
+  q = { { key = '2:0_1', what = 'walkcol' }, { key = '2:2_0', what = 'road' } }
+  T.check(q[roads.nextWalk(q)].what == 'road', 'the road mesh (asphalt, lines) before the colliders of nearer tiles')
+  q = { { key = '2:0_0', what = 'walkcol' }, { key = '2:0_0', what = 'road' } }
+  T.check(q[roads.nextWalk(q)].what == 'road', 'and in the same tile')
   for _, k in ipairs({ '2_0', '0_1', '0_2', '-2_0', '0_0' }) do roads.onDrop({ anchorId = 2, key = k }) end
   roads.update(gov, 2)
   car.getVelocity = nil
