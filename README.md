@@ -76,6 +76,7 @@ the mod that is not on this page is TecnaGamer's and its contributors'.
 - A loaned rally car (your car is parked and given back), the game's ground arrows along the stage, the stage on the
   GPS minimap, checkpoint splits, and a Reset to road button (+5 s)
 - $100 entry (refunded if you quit before GO); gold, silver and bronze target times pay $800, $400 and $200
+- New races are being worked on as we speak, just need time to get things out.
 
 <img src="docs/fork/rally.gif" alt="A rally stage: the pacenote arrows on the road" width="560">
 
