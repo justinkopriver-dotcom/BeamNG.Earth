@@ -27,6 +27,7 @@ M.TRUCK_WAIT_S = 150        -- (truck searches: far cells, a first download each
 -- job"): the rented semi replaces your car, the trailer stands TRAILER_BACK_M behind it to back up to and couple; the
 -- load counts as delivered when the trailer is within TRAILER_M of the drop-off; the job's rent comes off the pay
 M.TRAILER_BACK_M = 16.0
+M.TRAILER_DELAY_S = 1.5     -- s after the semi is out before its trailer is
 -- bonuses on top of the pay (the user, 2026-10-26: "add bonuses for things, showing up early, good driver streak, no
 -- fines"): SPOTLESS for no damage (under CLEAN_DMG), RECORD for no police chase or fine during the job, and STREAK_STEP
 -- for each clean delivery before it in a row (no damage, no police; at most STREAK_MAX), kept in STREAK_FILE
@@ -242,10 +243,9 @@ function M.startWork()
   local job = active.job
   active.own = vehOf(playerVeh())
   if not workVehicle(job.car) then return false, 'could not bring out the ' .. tostring(job.car_name) end
-  if job.trailer then
-    active.trailerId = spawnTrailer(job.trailer, job.trailer_config)
-    msg('Your ' .. tostring(job.cargo) .. ' trailer is behind you: back up and couple it', 'info')
-  end
+  -- (the trailer a moment later, not in the frame the semi is: the third-person camera flickered at the start of a truck
+  -- job, the user 2026-10-27, while it was moving to the new vehicle, a second car dropping in behind it)
+  if job.trailer then active.trailerIn = M.TRAILER_DELAY_S end
   active.stage, active.t, active.stop, active.ready = 'deliver', 0, 1, nil
   local first = job.stops and job.stops[1] or job.dropoff
   gps.setDestination(first.lat, first.lon, first.name)
@@ -312,6 +312,14 @@ function M.update(dt, anchor, player)
   poll()
   if not active or not anchor or not player then return end
   local job = active.job
+  if active.trailerIn then
+    active.trailerIn = active.trailerIn - (dt or 0)
+    if active.trailerIn <= 0 then
+      active.trailerIn = nil
+      active.trailerId = spawnTrailer(job.trailer, job.trailer_config)
+      msg('Your ' .. tostring(job.cargo) .. ' trailer is behind you: back up and couple it', 'info')
+    end
+  end
   local speed = math.sqrt((player.vx or 0) ^ 2 + (player.vy or 0) ^ 2)
   if active.stage == 'pickup' then
     drawBay(anchor, job.pickup, player)
