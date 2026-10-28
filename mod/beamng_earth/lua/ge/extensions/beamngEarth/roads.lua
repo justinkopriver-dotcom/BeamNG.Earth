@@ -72,6 +72,8 @@ M.ROAD_FIRST_M = 800        -- a tile's road mesh (the asphalt and its lines: wh
 -- still charged: what follows waits), one every URGENT_EVERY_FRAMES at most: at ~20 ms an import on a Steam Deck, the
 -- 2-4 ms budget let ~3 a second through, fewer than a city's tiles bring at 80 mph
 M.URGENT_EVERY_FRAMES = 3
+M.ROAD_URGENT_MS = 15       -- from this speed (m/s, ~35 mph) a road mesh (asphalt and lines) ahead is made at once like a deck: the
+                            -- 2 ms budget let too few through at 80-90 mph (the user, 2026-10-27: lines missing until a pause)
 -- No be:reloadCollision for SWAP_QUIET_FRAMES frames and SWAP_QUIET_MS after a terrain .ter swap (M.terrainSwapped): the
 -- swapped block's collision follows by itself a frame later, and a rebuild in between took the block before its
 -- heights were in: flat ground at z 0 for a second, and a ball at 180 mph sank under the real ground and fell through
@@ -912,14 +914,20 @@ function M.urgentWalk(q)
   local p, dir = playerNow()
   if not p then return nil end
   local reach = math.max(150, lastSpeed * M.URGENT_S) + M.TILE_M * 0.71
+  local roadReach = lastSpeed >= M.ROAD_URGENT_MS and reach * 1.5 or nil    -- (a fast car: its road mesh too)
   local best, bd = nil, math.huge
   for i, e in ipairs(q) do
-    if e.what == 'deck' or e.what == 'tunnel' then
+    local deck = e.what == 'deck' or e.what == 'tunnel'
+    if deck or (roadReach and e.what == 'road') then
       local t = tiles[e.key]
       if t and t.cx and not t.ghost and (not e.tile or e.tile == t) then
         local dx, dy = t.cx - p.x, t.cy - p.y
         local d = math.sqrt(dx * dx + dy * dy)
-        if d <= reach and d < bd and (not dir or dx * dir.x + dy * dir.y > -M.TILE_M / 2) then best, bd = i, d end
+        local ahead = not dir or dx * dir.x + dy * dir.y > -M.TILE_M / 2
+        if d <= (deck and reach or roadReach) and ahead then
+          local k = deck and d - M.DRIVE_FIRST_M or d       -- (what the car drives on first, then what it sees)
+          if k < bd then best, bd = i, k end
+        end
       end
     end
   end

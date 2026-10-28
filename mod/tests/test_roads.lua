@@ -305,7 +305,9 @@ do
   q = { { key = '2:2_0', what = 'walkcol' }, { key = '2:0_2', what = 'deck' }, { key = '2:2_0', what = 'deck' },
         { key = '2:-2_0', what = 'deck' } }
   T.check(roads.urgentWalk(q) == 3, 'urgent: the deck ahead within reach (not beside first, not behind)')
-  T.check(roads.urgentWalk({ { key = '2:2_0', what = 'walkcol' } }) == nil, 'urgent: decks and tunnels only')
+  T.check(roads.urgentWalk({ { key = '2:2_0', what = 'walkcol' } }) == nil, 'urgent: decks, tunnels and road meshes only')
+  T.check(roads.urgentWalk({ { key = '2:2_0', what = 'walkcol' }, { key = '2:2_0', what = 'road' } }) == 2, 'urgent: the road mesh ahead of a fast car')
+  T.check(roads.urgentWalk({ { key = '2:-2_0', what = 'road' } }) == nil, 'but not one behind it')
   function car:getVelocity() return vec3(0, 0, 0) end
   roads.update(gov, 2)
   q = { { key = '2:2_0' }, { key = '2:0_1' } }
