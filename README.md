@@ -16,6 +16,7 @@ the mod that is not on this page is TecnaGamer's and its contributors'.
 | **Ours** | Phone, money, jobs, Beamazon, garage and real estate, rally, police heat, dynamic weather, guide signs, rumble strips, GPS turn-by-turn |
 | **Not ours** | Everything else: terrain, imagery, roads, buildings, trees, multiplayer, the world map, Autodrive |
 | **Not ours, included** | Guardrails: [PR #205](https://github.com/TecnaGamer/BeamNG.Earth/pull/205) by Arbuz |
+| **Ian's, included** | The phone's Maps app (search, route choices, turn-by-turn steps) and its map layers: [ianmadez](https://github.com/ianmadez)'s [iPhone navigation work](https://github.com/ianmadez/BeamNG.Earth/tree/feature/iphone-navigation-mod) |
 
 ### What's new in this release
 - Built on **BeamNG.Earth 1.7.0 beta** (all of our features carried over)
@@ -112,6 +113,9 @@ from this fork's `my-features` branch (green **Code** button > **Download ZIP**,
 `python tools/package.py`). On Windows you can just double-click `Play BeamNG.Earth.bat`.
 
 ## Credits and license
+- **Ian Madez** ([ianmadez](https://github.com/ianmadez)): the phone's Maps app (search, route choices, turn-by-turn steps) and its map layers, from his [iPhone navigation branch](https://github.com/ianmadez/BeamNG.Earth/tree/feature/iphone-navigation-mod), integrated here.
+- **Arbuz**: the guardrails ([PR #205](https://github.com/TecnaGamer/BeamNG.Earth/pull/205)).
+
 BeamNG.Earth is by TecnaGamer and its contributors ([CREDITS.md](CREDITS.md)); this fork's additions are by Justin
 Kopriver. Code: MIT, see [LICENSE](LICENSE). BeamNG.drive is a trademark of BeamNG GmbH; this is an unofficial fan
 project and contains no BeamNG assets.
