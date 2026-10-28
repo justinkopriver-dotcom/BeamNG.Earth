@@ -49,14 +49,14 @@ class StripTest(unittest.TestCase):
         key = lambda a: sorted(map(tuple, np.round(a, 4)))
         self.assertEqual(key(whole), key(tiled))
 
-    def test_mesh_boxes_face_outward(self):
+    def test_mesh_ridges_face_outward(self):
         g = rumble.strips([road(L=60.0)], BIG, ground)
         P, T, UV, M = gs.mesh([g], (0.0, 0.0, 0.0))
         self.assertTrue((M == gs.CONCRETE).all())
-        self.assertEqual(len(T), 6 * len(g["c"]))
+        self.assertEqual(len(T), 4 * len(g["c"]))
         n = np.cross(P[T[:, 1]] - P[T[:, 0]], P[T[:, 2]] - P[T[:, 0]])
         cen = P[T].mean(axis=1)
-        bar = np.repeat(g["c"], 6, axis=0) + np.array([0.0, 0.0, rumble.BAR_H_M / 2])
+        bar = np.repeat(g["c"], 4, axis=0) + np.array([0.0, 0.0, rumble.BAR_H_M / 2])
         self.assertTrue(((n * (cen - bar)).sum(axis=1) > 0).all(), "every face outward")
         self.assertAlmostEqual(float(P[:, 2].max() - P[:, 2].min()), rumble.BAR_H_M + 0.01 * 60.0, delta=0.6)
 

@@ -124,13 +124,18 @@ end
 
 -- Every frame in our level (core): dt s since the last call.
 local lastT = nil
+local weatherMod = nil          -- (required once, not a pcall(require) every frame)
 function M.update(dt, now)
   now = now or os.clock()
   if dt == nil then dt = lastT and (now - lastT) or 0 end
   lastT = now
-  local ok, w = pcall(require, 'beamngEarth/weather')
+  local w = weatherMod
+  if not w then
+    local ok, got = pcall(require, 'beamngEarth/weather')
+    if ok then w, weatherMod = got, got end
+  end
   local rain, sn, temp
-  if ok and w.roadInputs then rain, sn, temp = w.roadInputs() end
+  if w and w.roadInputs then rain, sn, temp = w.roadInputs() end
   if not rain then return end
   wet, snow = M.step(wet, snow, math.min(dt or 0, 1), rain, sn, temp)
   if now - lastApply < M.APPLY_S then return end

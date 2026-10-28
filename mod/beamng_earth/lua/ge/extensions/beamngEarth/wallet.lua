@@ -140,10 +140,13 @@ end
 function M.update(anchor, px, py)
   if not anchor or not px then lastPos = nil return end
   local lp = lastPos
-  lastPos = { anchor = anchor, x = px, y = py }
-  if not lp or lp.anchor ~= anchor then return end
-  local d2 = (px - lp.x) ^ 2 + (py - lp.y) ^ 2
-  if d2 < 1e-4 or d2 > 200 ^ 2 then return end        -- standing still, or a teleport
+  if not lp then lp = {}; lastPos = lp; lp.anchor, lp.x, lp.y = anchor, px, py; return end     -- (one table, reused: no garbage a frame)
+  local ox, oy, oa = lp.x, lp.y, lp.anchor
+  lp.anchor, lp.x, lp.y = anchor, px, py
+  if oa ~= anchor then return end
+  local d2 = (px - ox) ^ 2 + (py - oy) ^ 2
+  if d2 < 1e-4 or d2 > 200 ^ 2 or next(tolls) == nil then return end        -- standing still, a teleport, or no gantries
+  lp = { x = ox, y = oy }
   for _, t in pairs(tolls) do
     if t.anchor == anchor then
       for _, g in ipairs(t.list) do

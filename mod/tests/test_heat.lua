@@ -64,4 +64,15 @@ H.onPursuitAction(5, 'arrest', {})
 T.near(before - W.balance(), 60, 1e-6, 'a new car pulling over at once: a $60 ticket')
 H.onPursuitAction(7, 'start', {})
 T.check(H._chase() == nil, 'another car\'s chase: ignored')
+-- forgiving cops: the stock police's strictness lowered once a level, and on world traffic
+local seen = {}
+gameplay_police = { setPoliceVars = function(v) seen[#seen + 1] = v end }
+H._reset()
+H.update(0.1)
+H.update(0.1)
+T.check(#seen == 1 and seen[1].strictness < 0.5 and seen[1].suspectFrequency < 0.5, 'less strict police, applied once')
+T.check(H.tune() == true and #seen == 2, 'and again when world traffic starts')
+gameplay_police = nil
+T.check(H.tune() == false, 'no police module: nothing to tune')
+
 T.done('test_heat')

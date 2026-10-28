@@ -679,8 +679,8 @@ def toll_gantry(m, g):
 
 
 def _rumble(m, g):
-    """rumble.py's bars, all at once: each a box's top and its two faces across the road (the ones a tyre meets); no
-    bottom (on the ground) and no ends (along the strip: a tyre never meets them)."""
+    """rumble.py's bars, all at once: each a low ridge across the road (6 vertices, 4 triangles: the two slopes a tyre
+    meets; no bottom, on the ground, and no ends, which a tyre never meets). Was a box (8 / 6) every 0.3 m."""
     import rumble
     c, d = np.asarray(g["c"], np.float64), np.asarray(g["d"], np.float64)
     n = len(c)
@@ -689,16 +689,15 @@ def _rumble(m, g):
     a = np.column_stack([d * (rumble.BAR_ALONG_M / 2), np.zeros(n)])
     b = np.column_stack([np.stack([-d[:, 1], d[:, 0]], axis=1) * (rumble.BAR_ACROSS_M / 2), np.zeros(n)])
     up = np.array([0.0, 0.0, rumble.BAR_H_M])
-    lo = np.stack([c - a - b, c + a - b, c + a + b, c - a + b], axis=1)          # (n, 4, 3)
-    pts = np.concatenate([lo, lo + up], axis=1) - m.o                             # (n, 8, 3)
+    pts = np.stack([c - a - b, c - a + b, c - b + up, c + b + up, c + a - b, c + a + b], axis=1) - m.o[None, None]   # (n, 6, 3)
     base = len(m.P)
     m.P.extend(pts.reshape(-1, 3))
-    m.UV.extend([(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)] * (2 * n))
-    # top (4 5 6 7), the face at -a (0 3 7 4) and at +a (1 5 6 2), counter-clockwise from outside
-    local = np.array([(4, 5, 6), (4, 6, 7), (0, 4, 7), (0, 7, 3), (1, 2, 6), (1, 6, 5)])
-    tris = (base + 8 * np.arange(n))[:, None, None] + local[None]
+    m.UV.extend([(0.0, 0.0), (0.0, 1.0), (0.5, 0.0), (0.5, 1.0), (1.0, 0.0), (1.0, 1.0)] * n)
+    # the slope at -a (0 3 1, 0 2 3) and at +a (2 4 5, 2 5 3), counter-clockwise from outside
+    local = np.array([(0, 3, 1), (0, 2, 3), (2, 4, 5), (2, 5, 3)])
+    tris = (base + 6 * np.arange(n))[:, None, None] + local[None]
     m.T.extend(map(tuple, tris.reshape(-1, 3)))
-    m.M.extend([CONCRETE] * (6 * n))
+    m.M.extend([CONCRETE] * (4 * n))
 
 
 def mesh(signs, origin):
