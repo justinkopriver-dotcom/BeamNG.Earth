@@ -21,12 +21,17 @@ M.EARLY_BONUS = 0.20
 M.LATE_PER_MIN = 0.02
 M.LATE_MAX = 0.5
 M.DAMAGE_FULL = 15000.0     -- the vehicle's damage (beamstate, ~$) at which the whole pay is lost
+-- ... a truck haul forgives more (the user, 2026-10-28: "the open road just damages beamng vehicles ... leave room for
+-- forgiveness"): the first TRUCK_DMG_FREE + TRUCK_DMG_PER_MI a mile of damage costs nothing, and the whole pay is lost
+-- only at TRUCK_DAMAGE_FULL
+M.TRUCK_DMG_FREE, M.TRUCK_DMG_PER_MI, M.TRUCK_DAMAGE_FULL = 2500.0, 40.0, 40000.0
 M.REQUEST_WAIT_S = 40
 M.TRUCK_WAIT_S = 150        -- (truck searches: far cells, a first download each)
 -- trucking (the user: "just spawn me in the truck and the trailer nearby"; "rent a truck and pay them a small fee each
 -- job"): the rented semi replaces your car, the trailer stands TRAILER_BACK_M behind it to back up to and couple; the
 -- load counts as delivered when the trailer is within TRAILER_M of the drop-off; the job's rent comes off the pay
 M.TRAILER_BACK_M = 16.0
+M.TRAILER_DELAY_S = 1.5     -- s after the semi is out before its trailer is
 -- bonuses on top of the pay (the user, 2026-10-26: "add bonuses for things, showing up early, good driver streak, no
 -- fines"): SPOTLESS for no damage (under CLEAN_DMG), RECORD for no police chase or fine during the job, and STREAK_STEP
 -- for each clean delivery before it in a row (no damage, no police; at most STREAK_MAX), kept in STREAK_FILE
@@ -81,11 +86,17 @@ function M.payout(job, t, damage, expenses, police, streak)
     late = base * math.min(M.LATE_MAX, M.LATE_PER_MIN * (t - limit) / 60)
   end
   local earned = math.max(0, base + bonus - late)          -- (a wrecked car loses its early bonus too)
-  local dmg = earned * math.min(1, math.max(0, tonumber(damage) or 0) / M.DAMAGE_FULL)
+  local rawDamage = math.max(0, tonumber(damage) or 0)
+  local full, charged = M.DAMAGE_FULL, rawDamage
+  if job.kind == 'truck' then
+    full = M.TRUCK_DAMAGE_FULL
+    charged = math.max(0, rawDamage - M.TRUCK_DMG_FREE - M.TRUCK_DMG_PER_MI * (tonumber(job.dist) or 0) / 1609.344)
+  end
+  local dmg = earned * math.min(1, charged / full)
   local exp = math.max(0, tonumber(expenses) or 0)
   local r = function(v) return math.floor(v * 100 + 0.5) / 100 end
   local spotless = (tonumber(damage) or 0) < M.CLEAN_DMG and base * M.SPOTLESS or 0
-  local whole = 1 - math.min(1, math.max(0, tonumber(damage) or 0) / M.DAMAGE_FULL)    -- (a wreck earns no bonuses)
+  local whole = 1 - math.min(1, charged / full)    -- (a wreck earns no bonuses)
   local record = (not police) and base * M.RECORD * whole or 0
   local sb = base * math.min(M.STREAK_MAX, M.STREAK_STEP * math.max(0, tonumber(streak) or 0)) * whole
   local work = earned - dmg + spotless + record + sb
@@ -242,10 +253,9 @@ function M.startWork()
   local job = active.job
   active.own = vehOf(playerVeh())
   if not workVehicle(job.car) then return false, 'could not bring out the ' .. tostring(job.car_name) end
-  if job.trailer then
-    active.trailerId = spawnTrailer(job.trailer, job.trailer_config)
-    msg('Your ' .. tostring(job.cargo) .. ' trailer is behind you: back up and couple it', 'info')
-  end
+  -- (the trailer a moment later, not in the frame the semi is: the third-person camera flickered at the start of a truck
+  -- job, the user 2026-10-27, while it was moving to the new vehicle, a second car dropping in behind it)
+  if job.trailer then active.trailerIn = M.TRAILER_DELAY_S end
   active.stage, active.t, active.stop, active.ready = 'deliver', 0, 1, nil
   local first = job.stops and job.stops[1] or job.dropoff
   gps.setDestination(first.lat, first.lon, first.name)
@@ -257,16 +267,25 @@ end
 -- The delivery bays (the user: "the same feature as career where you have a spot to pull into"): a green bay drawn at
 -- the pickup and at each drop-off; you are there when stopped inside it.
 M.BAY_M = 5.0
+-- (performance: the bay's ground height looked up once per place and anchor, not a ground ray every frame)
+-- (refreshed every Z_REFRESH_S: the ground may still have been loading when it was first measured)
+M.Z_REFRESH_S = 1.0
+local bayZ = { place = nil, anchor = nil, z = nil, t = -math.huge }
 local function drawBay(anchor, place, player)
   local dd = rawget(_G, 'debugDrawer')
   if not (dd and place and player) then return end
   local x, y = anchor:geodeticToEnu(place.lat, place.lon, 0)
   if (x - player.x) ^ 2 + (y - player.y) ^ 2 > 250 ^ 2 then return end
   pcall(function()
-    local z = player.z or 0
-    local be_ = rawget(_G, 'be')
-    local okz, h = pcall(function() return be_:getSurfaceHeightBelow(vec3(x, y, z + 20)) end)
-    if okz and tonumber(h) and h > -1e6 then z = h end
+    local now = os.clock()
+    if bayZ.place ~= place or bayZ.anchor ~= anchor or not bayZ.z or now - bayZ.t > M.Z_REFRESH_S then
+      local z = player.z or 0
+      local be_ = rawget(_G, 'be')
+      local okz, h = pcall(function() return be_:getSurfaceHeightBelow(vec3(x, y, z + 20)) end)
+      if okz and tonumber(h) and h > -1e6 then z = h end
+      bayZ.place, bayZ.anchor, bayZ.z, bayZ.t = place, anchor, z, now
+    end
+    local z = bayZ.z
     dd:drawCylinder(vec3(x, y, z), vec3(x, y, z + 0.06), M.BAY_M, ColorF(0.2, 0.85, 0.35, 0.4))
   end)
 end
@@ -303,6 +322,14 @@ function M.update(dt, anchor, player)
   poll()
   if not active or not anchor or not player then return end
   local job = active.job
+  if active.trailerIn then
+    active.trailerIn = active.trailerIn - (dt or 0)
+    if active.trailerIn <= 0 then
+      active.trailerIn = nil
+      active.trailerId = spawnTrailer(job.trailer, job.trailer_config)
+      msg('Your ' .. tostring(job.cargo) .. ' trailer is behind you: back up and couple it', 'info')
+    end
+  end
   local speed = math.sqrt((player.vx or 0) ^ 2 + (player.vy or 0) ^ 2)
   if active.stage == 'pickup' then
     drawBay(anchor, job.pickup, player)

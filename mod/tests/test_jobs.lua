@@ -130,6 +130,10 @@ J._setOffers({ haul })
 J.accept(1)
 J.update(0.1, anchor, { x = 0, y = 0, vx = 0, vy = 0 })
 J.startWork()
+T.check(#spawned == 0, 'the trailer not in the semi\'s frame')
+J.update(0.1, anchor, { x = 0, y = 0, vx = 0, vy = 0 })
+T.check(#spawned == 0, 'nor a moment later')
+J.update(J.TRAILER_DELAY_S, anchor, { x = 0, y = 0, vx = 0, vy = 0 })
 T.check(replaced[#replaced][1] == 'us_semi', 'the rented semi')
 T.check(spawned[1][1] == 'tanker' and spawned[1][2].y == -16, 'its trailer 16 m behind')
 T.check(spawned[1][3] == 'vehicles/tanker/petroleum_3.pc', 'loaded with the job\'s cargo')
@@ -177,4 +181,17 @@ T.check(J._active().stop == 2 and dests[#dests] == 'Stop 2', 'stop 1 done: to st
 J.update(10, anchor, { x = 0, y = 2220, vx = 0, vy = 0 })
 J.update(10, anchor, { x = 0, y = 3330, vx = 0, vy = 0 })
 T.check(J._active() == nil and W.balance() > b2, 'the last stop: paid')
+-- a truck haul forgives damage: a free allowance and a slower loss (the user, 2026-10-28)
+do
+  local hj = { kind = 'truck', pay = 5000, dur = 7200, limit = 9000, dist = 110 * 1609.344, rent = 0 }
+  local clean = J.payout(hj, 7000, 0, 0, false, 0)
+  local rough = J.payout(hj, 7000, 6000, 0, false, 0)      -- 6000 under 2500 + 40 * 110 = 6900: all forgiven
+  T.check(rough.damage == 0, 'a rough 110 miles: no damage cost: ' .. tostring(rough.damage))
+  local wreck = J.payout(hj, 7000, 20000, 0, false, 0)
+  T.check(wreck.damage > 0 and wreck.damage < wreck.base * 0.5, 'a heavy hit costs some, not most of the pay')
+  local car = J.payout({ kind = 'car', pay = 5000, dur = 7200, limit = 9000, dist = 110 * 1609.344, rent = 0 }, 7000, 6000, 0, false, 0)
+  T.check(car.damage > 0, 'a car job keeps its damage cost')
+  T.check(clean.total >= rough.total, 'clean pays at least as much')
+end
+
 T.done('test_jobs')

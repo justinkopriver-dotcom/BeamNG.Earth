@@ -18,7 +18,7 @@ on the ground (not on bridges or in cuttings, where the terrain is not the road'
 import numpy as np
 
 CLASSES = ("motorway", "trunk")
-PERIOD_M = 0.30             # m between bars along the road
+PERIOD_M = 0.50             # m between bars along the road (0.30 before: 40% fewer bars to draw and collide with)
 BAR_ALONG_M = 0.16          # a bar's length along the road ...
 BAR_ACROSS_M = 0.40         # ... its width across ...
 BAR_H_M = 0.013             # ... and height
@@ -26,7 +26,7 @@ EDGE_GAP_M = 0.10           # m from the edge line's outer side to the strip
 OTHER_CLEAR_M = 0.5         # m kept clear of another road's pavement
 ON_GROUND_M = 0.6           # the road's own height within this of the ground under the bar
 END_CLEAR_M = 25.0          # m kept clear of a segment's ends (merges, exits, junctions)
-MAX_BARS = 6000             # per tile (the shape's vertex limit, with the signs)
+MAX_BARS = 4000             # per tile (the shape's vertex limit, with the signs)
 
 
 def offset(spec):

@@ -31,6 +31,7 @@ function M.set(want)
     police()
     local ok = pcall(tr.setupTraffic, M.CARS, { police = true })
     on = ok
+    pcall(function() require('beamngEarth/heat').tune() end)       -- (forgiving cops: heat.POLICE_VARS)
     return ok
   end
   pcall(tr.deleteVehicles)

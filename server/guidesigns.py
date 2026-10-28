@@ -678,27 +678,29 @@ def toll_gantry(m, g):
         m.box(c + R * uu + U * (CLEAR_M + 0.25) + F * 0.35, R * 0.12, F * 0.18, U * 0.12, ATLAS, black)  # camera
 
 
-def _rumble(m, g):
-    """rumble.py's bars, all at once: each a box's top and its two faces across the road (the ones a tyre meets); no
-    bottom (on the ground) and no ends (along the strip: a tyre never meets them)."""
+_RIDGE_UV = np.array([(0.0, 0.0), (0.0, 1.0), (0.5, 0.0), (0.5, 1.0), (1.0, 0.0), (1.0, 1.0)], np.float32)
+# the slope at -a (0 3 1, 0 2 3) and at +a (2 4 5, 2 5 3), counter-clockwise from outside
+_RIDGE_TRIS = np.array([(0, 3, 1), (0, 2, 3), (2, 4, 5), (2, 5, 3)], np.int32)
+
+
+def _rumble(g, origin, base, room):
+    """rumble.py's bars, all at once, as arrays (positions, uvs, tris, materials) or None: each a low ridge across the
+    road (6 vertices, 4 triangles: the two slopes a tyre meets; no bottom, on the ground, and no ends, which a tyre
+    never meets). Was a box (8 / 6) every 0.3 m, in Python lists (4x slower). base: the vertices before these; room:
+    the vertices this shape can still take."""
     import rumble
     c, d = np.asarray(g["c"], np.float64), np.asarray(g["d"], np.float64)
-    n = len(c)
+    n = min(len(c), max(0, room) // 6)
     if not n:
-        return
+        return None
+    c, d = c[:n], d[:n]
     a = np.column_stack([d * (rumble.BAR_ALONG_M / 2), np.zeros(n)])
     b = np.column_stack([np.stack([-d[:, 1], d[:, 0]], axis=1) * (rumble.BAR_ACROSS_M / 2), np.zeros(n)])
     up = np.array([0.0, 0.0, rumble.BAR_H_M])
-    lo = np.stack([c - a - b, c + a - b, c + a + b, c - a + b], axis=1)          # (n, 4, 3)
-    pts = np.concatenate([lo, lo + up], axis=1) - m.o                             # (n, 8, 3)
-    base = len(m.P)
-    m.P.extend(pts.reshape(-1, 3))
-    m.UV.extend([(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)] * (2 * n))
-    # top (4 5 6 7), the face at -a (0 3 7 4) and at +a (1 5 6 2), counter-clockwise from outside
-    local = np.array([(4, 5, 6), (4, 6, 7), (0, 4, 7), (0, 7, 3), (1, 2, 6), (1, 6, 5)])
-    tris = (base + 8 * np.arange(n))[:, None, None] + local[None]
-    m.T.extend(map(tuple, tris.reshape(-1, 3)))
-    m.M.extend([CONCRETE] * (6 * n))
+    pts = np.stack([c - a - b, c - a + b, c - b + up, c + b + up, c + a - b, c + a + b], axis=1) - origin   # (n, 6, 3)
+    tris = (base + 6 * np.arange(n, dtype=np.int32))[:, None, None] + _RIDGE_TRIS[None]
+    return (pts.reshape(-1, 3).astype(np.float32), np.tile(_RIDGE_UV, (n, 1)), tris.reshape(-1, 3),
+            np.full(4 * n, CONCRETE, np.int32))
 
 
 def mesh(signs, origin):
@@ -707,15 +709,10 @@ def mesh(signs, origin):
     if not signs:
         return None
     m = _Mesh(origin)
-    signs = [g for g in signs if g["kind"] != "rumble"] + [g for g in signs if g["kind"] == "rumble"]
+    bars = []                           # (the rumble bars go last, after the signs, as arrays: no Python list of them)
     for g in signs:
         n0 = len(m.P)
         if g["kind"] == "rumble":
-            _rumble(m, g)
-            if len(m.P) > MAX_VERTS:
-                del m.P[n0:], m.UV[n0:]
-                k = next(i for i, t in enumerate(m.T) if t[0] >= n0)
-                del m.T[k:], m.M[k:]
             continue
         if g["kind"] == "toll":
             toll_gantry(m, g)
@@ -728,7 +725,17 @@ def mesh(signs, origin):
             k = next(i for i, t in enumerate(m.T) if t[0] >= n0)
             del m.T[k:], m.M[k:]
             break
-    if not m.P:
+    nv = len(m.P)
+    for g in signs:
+        if g["kind"] == "rumble":
+            r = _rumble(g, m.o, nv, MAX_VERTS - nv)
+            if r is not None:
+                bars.append(r)
+                nv += len(r[0])
+    if not nv:
         return None
-    return (np.asarray(m.P, np.float32), np.asarray(m.T, np.int32), np.asarray(m.UV, np.float32),
-            np.asarray(m.M, np.int32))
+    P, UV = [np.asarray(m.P, np.float32).reshape(-1, 3)], [np.asarray(m.UV, np.float32).reshape(-1, 2)]
+    T, M = [np.asarray(m.T, np.int32).reshape(-1, 3)], [np.asarray(m.M, np.int32)]
+    for p_, uv_, t_, m_ in bars:
+        P.append(p_), UV.append(uv_), T.append(t_), M.append(m_)
+    return np.concatenate(P), np.concatenate(T), np.concatenate(UV), np.concatenate(M)

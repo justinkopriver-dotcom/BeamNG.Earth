@@ -49,8 +49,12 @@ M.SCHEMA = {
   -- grass and shrubs on the surface layers (groundcover.lua; needs the server's --surface on)
   groundCover = { kind = 'bool', default = true, label = 'Grass and shrubs' },
   groundCoverDensity = { kind = 'enum', default = 'normal', values = { 'low', 'normal', 'high' }, label = 'Grass density' },
+  -- the vegetation tiles' rocks and boulders (trees.lua groups rock, desert_rock; GitHub #5, after PR #321)
+  rocks = { kind = 'bool', default = true, label = 'Rocks' },
   -- roads near the player (roads.lua; the server's --roads on)
   roads = { kind = 'bool', default = true, label = 'Roads' },
+  -- Earth imagery on supported vehicle dashboard screens (dashboard.lua)
+  dashboardSatellite = { kind = 'bool', default = true, label = 'Satellite on dashboard screens' },
   hudVisible = { kind = 'bool', default = false, label = 'Status HUD at level start' },
   -- the status bar at the top (statusbar.lua): street, town / state / country, loading, fps
   statusBar = { kind = 'bool', default = true, label = 'Status bar' },
@@ -74,7 +78,8 @@ M.SCHEMA = {
   updateDismissed = { kind = 'string', default = '', maxLen = 40, label = 'Update notice dismissed (version)' },
 }
 M.ORDER = { 'rebaseDistance', 'viewDistanceMode', 'viewDistanceKm', 'hazeStrength', 'skyMode', 'clouds',
-  'weatherMode', 'realGravity', 'groundCover', 'groundCoverDensity', 'roads', 'hudVisible', 'statusBar',
+  'weatherMode', 'realGravity', 'groundCover', 'groundCoverDensity', 'rocks', 'roads', 'dashboardSatellite',
+  'hudVisible', 'statusBar',
   'placeNamesOnline', 'creditsVisible', 'beammpOnLaunch',
   'creditsCorner', 'creditsSize', 'cacheCapGb', 'devOutlineKm', 'devMapKm' }
 
@@ -249,9 +254,14 @@ M.APPLY = {
   end,
   groundCover = function(v) require('beamngEarth/groundcover').setEnabled(v) end,
   groundCoverDensity = function(v) require('beamngEarth/groundcover').setDensity(v) end,
+  rocks = function(v) require('beamngEarth/trees').setGroupEnabled({ 'rock', 'desert_rock' }, v) end,
   roads = function(v)
     local core = ext('beamngEarth_core')
     if core and core.setRoadsEnabled then core.setRoadsEnabled(v) else require('beamngEarth/roads').setEnabled(v) end
+  end,
+  dashboardSatellite = function(v)
+    local dashboard = ext('beamngEarth_dashboard')
+    if dashboard and dashboard.setEnabled then dashboard.setEnabled(v) end
   end,
   hudVisible = function(v)
     if M.pageExists() then ui.visible = v end
@@ -478,7 +488,8 @@ end
 -- goes out too (it cancels).
 M.MAP_ASK_S = 4
 M.MAP_TILES_DIR = '/temp/beamngEarth/maptiles/'
-M.MAP_LAYERS = { sat = '.jpg', map = '.jpg', labels = '.png' }   -- server maptiles.LAYERS
+M.MAP_LAYERS = { sat = '.jpg', map = '.jpg', labels = '.png', apple = '.jpg', appledark = '.jpg',
+  labelsdark = '.png', sathd = '.jpg' }                                          -- server maptiles.LAYERS
 function M.mapTilePath(layer, z, x, y)
   local zxy = string.format('%d/%d/%d', z, x, y)
   if layer == 'sat' then return M.MAP_TILES_DIR .. zxy .. '.jpg' end   -- (where it always was)
@@ -520,6 +531,23 @@ local function otherPlayers()
   return ok and list or nil
 end
 
+-- The map's weather + local-time badge (the player's spot): sky.lua's real local clock for the lat/lon, and the
+-- latest 'weather' message's code/temperature (weather.current(), a plain table; weather.status() is a dumps()
+-- string for the console, too slow to parse every second). nil when neither is up yet.
+local function localWeatherBadge()
+  local okS, sky = pcall(require, 'beamngEarth/sky')
+  local sst = okS and sky.status and sky.status()
+  local okW, weather = pcall(require, 'beamngEarth/weather')
+  local m = okW and weather.current and weather.current()
+  if not (sst and sst.localTime) and not m then return nil end
+  return {
+    localTime = sst and sst.localTime or nil,
+    code = m and m.code or nil,
+    tempC = m and (m.tempC or m.slTempC) or nil,
+    metric = require('beamngEarth/gps').metric(),      -- (the game's unit: the badge's °C or °F)
+  }
+end
+
 local mapPolledAt = nil    -- when the map last asked for its state (MAP_LOST_S)
 function M.uiMapState()
   mapPolledAt = os.clock()
@@ -537,6 +565,7 @@ function M.uiMapState()
     attribution = core and core.attribution and core.attribution() or '',
     creditsByArea = core and core.creditsByArea and core.creditsByArea() or nil,
     gps = require('beamngEarth/gps').status(),
+    weather = localWeatherBadge(),
   }
 end
 
@@ -645,7 +674,27 @@ function M.togglePhone()
   if guihooks then guihooks.trigger('BneEarthPhone', { up = phoneUp }) end
 end
 
+-- The app on the phone's screen (the phone tells, '' for the home screen), and Page Up's phone-on-an-app
+-- (ianmadez's Maps, merged in 2026-10-27): up on app; up on another app: switched to it; up on it: put away.
+local phoneApp = ''
+function M.uiPhoneApp(id) phoneApp = tostring(id or '') return true end
+function M.togglePhoneApp(app)
+  app = tostring(app or '')
+  if phoneUp and phoneApp == app then
+    phoneUp = false
+    if guihooks then guihooks.trigger('BneEarthPhone', { up = false }) end
+  else
+    phoneUp, phoneApp = true, app
+    if guihooks then guihooks.trigger('BneEarthPhone', { up = true, app = app }) end
+  end
+  return phoneUp
+end
+
+-- (performance: the phone asks every second while it is up; the folders are listed at most every WALLPAPER_S)
+local WALLPAPER_S = 30
+local wallCache, wallT = nil, -math.huge
 local function wallpapers()
+  if wallCache and os.clock() - wallT < WALLPAPER_S then return wallCache end
   local out = {}
   local fs = rawget(_G, 'FS')
   for _, dir in ipairs({ WALLPAPER_DIR, '/screenshots/' }) do
@@ -657,6 +706,7 @@ local function wallpapers()
     end
   end
   table.sort(out, function(a, b) return a > b end)       -- (screenshots: newest first by their dated names)
+  wallCache, wallT = out, os.clock()
   return out
 end
 
@@ -905,8 +955,11 @@ function M.mapControls(on)
     bm.onChangeUiFilter = function(v, dir) mapInput('filter', v, dir) end
     local veh = rawget(_G, 'getPlayerVehicle') and getPlayerVehicle(0)
     if veh then
+      -- the pedals let go (blocked below, they would hold their last value), the steering left as it is: written
+      -- here with the direct filter and no wheel angle, a force-feedback wheel locked fully right after the map until
+      -- the car was respawned, G920 / G29 / Fanatec / Moza (GitHub #284); the car stands still without it
       pcall(veh.queueLuaCommand, veh, "input.event('throttle', 0, 2) input.event('brake', 0, 2) "
-        .. "input.event('steering', 0, 2) input.event('clutch', 0, 2)")
+        .. "input.event('clutch', 0, 2)")
     end
     if filter and filter.createActionTemplate then
       pcall(function()

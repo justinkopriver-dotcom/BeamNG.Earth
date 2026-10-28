@@ -105,8 +105,36 @@ Same pattern as MSFS "anchor space", Cesium origin-shifting, and KSP floating or
   and navgraph node tables.
 - Output: atomic files in `<user>/temp/beamngEarth/<session>/` (versioned names,
   because the engine caches by path), plus small JSON control messages.
+- A small HTTP endpoint on 127.0.0.1 for the game's UI (its browser cannot reach http at all): map tiles as files
+  (`maptiles.py`, the `sat` / `map` / `labels` / `apple` layers — `apple` is terrain-light restyled into the phone's
+  palette, `appledark` / `labelsdark` its night pair, `sathd` the imagery sharpened where it is overzoomed),
+  `/tiles/{z}/{x}/{y}.jpg`, and the phone's `/api/search`, `/api/reverse` and `/api/route` (`phoneapi.py`, the same
+  functions the socket's `phone_search` / `phone_reverse` / `route` messages use).
+  - `/api/search?q=&lat=&lon=` → `[{name, lat, lon, distance_km, detail, source}]`: the game's saved places
+    (`settings/beamngEarth_places.json`) first, then Photon (`geocode.py`) biased to the car (`zoom=12`,
+    `location_bias_scale=0.4`) and sorted nearest-first; answers are cached 120 s so typing does not hammer Photon.
+  - `/api/reverse?lat=&lon=` → `{name, detail}`: Photon's nearest street/place, for a dropped pin (coordinates when
+    it cannot be asked).
+  - `/api/route?lat0=&lon0=&lat1=&lon1=&bearing=` → the OSRM route (`routing.py`); `alternatives=3` adds `routes`,
+    each tagged `Fastest` / `Main roads` / `Shortest` (`routing.tag_alternatives`: the share of distance on numbered
+    roads is what "main roads" means to us — OSRM's profile itself is not reweightable on the public server).
+- The restyle (`maptiles.py`, one numpy pass per tile, no extra network): terrain-light's luminance is turned into
+  coverage maps (water, vegetation, bare ground, roads, major roads) *at the source's own resolution*, each scaled up
+  with Lanczos and its road band narrowed, then coloured from a palette — near-white roads on soft blocks for the
+  light map, dark land with pale minor roads and bright motorways for the night one. The same trick sharpens the
+  imagery above its native zoom (`sathd`).
 
 ### Mod `beamng_earth`
+- Phone UI app `ui/modules/apps/BeamNGEarthPhone/` (`app.json` / `app.html` / `app.css` / `app.js` / `app.png`): an
+  AngularJS UI app, the only code that draws; every class is `bp-` prefixed and scoped under `.bngPhone` (app
+  stylesheets are global — a bare `.tile` once broke another app's map). It cannot fetch http, so its tiles come from
+  `settings.mapTiles` (files the server wrote) and its data from the `BeamNGEarthPhone` hook below.
+- Extension `beamngEarth_earthPhone` (`lua/ge/extensions/beamngEarth/earthPhone.lua`), the bridge: Page Up toggles
+  it (`actions/beamngEarth.json`, `keyboard_beamngEarth.json`), and while it is on screen it sends the app one
+  `BeamNGEarthPhone` hook 5x a second with the car's position and heading, the road's speed limit (from the AI road
+  graph), the route state (ETA, remaining, the maneuver and what a navigator would say, the route choices, whether a
+  re-plan is running) and any dropped pin — never the car's speed. Calls from the app (`search`, `navigate`,
+  `setPin`, `pickOption`, `endRoute`) come back through `bngApi.engineLua` as statements.
 - Level `levels/beamng_earth/`: smallgrid skeleton **without GroundPlane**,
   with SpawnSphere, LevelInfo, ScatterSky and TimeOfDay.
 - Extension `beamngEarth_core`, with these parts:
@@ -1482,7 +1510,12 @@ The user asked for "trees, rocks and other decoration" (ROADMAP v1.9 "Cities & n
     returns nil for datablocks), after loading the shapes' `main.materials.json`.
   - A tile shows the items whose rank is under its distance's threshold: all within 300 m, half to
     550 m, a quarter to 900 m, an eighth beyond (2026-10-14: out to 1280 m like the far buildings).
-  - Up to 300 items are made or removed per frame (~19 us each, 2026-10-13 probe: 1024 items in 19 ms).
+  - Items are made and removed every third frame, at most 750 and `FRAME_MS` (4 ms) of Lua per such frame
+    (`LOADING_FRAME_MS`, 12 ms, while the world loads; none in the governor's heavy frames); a pass stopped by
+    either goes on from its row in the next one. A tile's Forest comes from a pool: a new one costs ~9 ms to
+    register, so one a frame at most, and a few spares are made in tree frames with nothing else to do.
+    (2026-10-26, Fells Point autodrive, A/B twice: the slowest 1 % of tree frames 16.5-18.8 ->
+    9.5-9.6 ms, the worst 53-87 -> 15-17 ms; the same 90,228 forest items in the same places.)
 - **Regions (`vegetation.regional`, 2026-10-14):** a coarse climate from the position and the land cover
   turns the generic groups into the stock maps' species: West Coast pines / redwoods and oaks /
   eucalyptus (west of -114), junipers, desert bushes and rocks in the dry West's open land, palms on warm

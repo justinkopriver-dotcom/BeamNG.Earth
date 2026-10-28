@@ -74,8 +74,17 @@ local groundcover = require('beamngEarth/groundcover') -- grass on the surface l
 local roads = require('beamngEarth/roads') -- DecalRoads from the server's road tiles (docs/ROADMAP.md v1.6)
 local sea = require('beamngEarth/sea') -- the sea's WaterBlock tiles (server seatiles.py)
 local trees = require('beamngEarth/trees') -- trees, bushes, rocks (server vegetation.py)
+local ambience = require('beamngEarth/ambience') -- forest wind and room tone (the stock core_audioForest)
+local pumpjacks = require('beamngEarth/pumpjacks') -- oil wells' pump jacks (server oilwells.py)
+local nightlights = require('beamngEarth/nightlights') -- the buildings' windows lit at night
+pumpjacks.onCollide = roads.markCollisionDirty
 local parking = require('beamngEarth/parking') -- parked cars on the road tiles' spots (stock gameplay_parking)
 local gasstations = require('beamngEarth/gasstations') -- pumps and the stock refuel prompt (server gasstations.py)
+-- (the stations' pump islands: lit at night)
+nightlights.providers.gas = function() return gasstations.lightPoints() end
+-- (the tunnels' lights at night: by day the engine's sky light is not shut out of our tunnel meshes, so lights there
+-- changed nothing, 2026-10-27)
+nightlights.providers.tunnel = function() return ambience.tunnelLights() end
 gasstations.onCollide = roads.markCollisionDirty
 local navgraph = require('beamngEarth/navgraph')
 local postfx = require('beamngEarth/postfx')       -- no far depth-of-field blur in our level
@@ -89,11 +98,11 @@ local X = { jobs = require('beamngEarth/jobs'),             -- garage-to-garage 
   wallet = require('beamngEarth/wallet'),                   -- the player's money: fuel and tolls (wallet.lua)
   roadweather = require('beamngEarth/roadweather'),         -- rain and snow on the roads: grip and look
   rally = require('beamngEarth/rally'), rallyResults = {},  -- the Rally app's stages (rally.lua)
+  phoneSearchResults = {}, phoneReverseResults = {},        -- the Maps app's place search / pin names (earthPhone.lua)
   placesResults = {}, jobResults = {}, mediaState = nil, fuelResults = {} }   -- the phone's / map's server answers
 local collisionfoci = require('beamngEarth/collisionfoci') -- other vehicles' collision islands
 local terrainpatch = require('beamngEarth/terrainpatch')   -- ground under the islands off the terrain block
 local farcars = require('beamngEarth/farcars')             -- far player cars saved, taken out and put back
-local fociBroken = false
 -- The pose's foci: the last collision foci (collisionfoci.lua), rounded, at most 16 (earthd FOCI_MAX); nil when none.
 local function poseFoci()
   local f = collisionfoci.last
@@ -113,7 +122,6 @@ local perflog = require('beamngEarth/perflog')         -- hitches and frame-rate
 local LEVEL_ID = 'beamng_earth'
 local MOD_VERSION = '0.4.0'
 M.MOD_VERSION = MOD_VERSION
-local lastHello = nil     -- the last server hello (scalars only; report.lua's hardware.json)
 local PROTOCOL = 4
 -- Far-tile artefact formats the mod reads: 3 (v1.3.1, 32-cell tiles) and 4 (docs/V1_4_SPEC.md 3.1
 -- M1: 64-cell tiles down to L-1, hello.cells, far_tile.tex). hello.format = the newest (FORMAT).
@@ -518,6 +526,9 @@ local function finishRebase()
   -- roads, buildings, street furniture and trees move with it and stay until the new anchor's tiles cover them
   roads.transform(xf, geodesy)
   trees.transform(xf, geodesy)
+  ambience.transform(xf)
+  pumpjacks.transform(xf)
+  nightlights.transform(xf)
   gasstations.transform(xf)
   sea.transform(xf, msg.anchorId)
   -- a resync with a restarted server keeps the previous session's tiles the same way (st.sessionId
@@ -650,6 +661,36 @@ local function commitTerrain(msg)
   return true
 end
 
+-- Pure: a spot with collision under it near (x, y): (x, y, ground z) where groundAt(x, y) (the ground's height there or
+-- nil: nothing to stand on) finds some, the nearest first (rings SAFE_RING_M apart, SAFE_DIRS around, out to
+-- SAFE_MAX_M); nil when none. A teleport onto a tunnel's portal set the car down over the terrain's hole there before
+-- the cutting's road tile came, and it fell through the world (GitHub #339's spot near Grenoble, 2026-10-27).
+M.SAFE_RING_M, M.SAFE_DIRS, M.SAFE_MAX_M = 8, 12, 96
+function M.safeSpot(x, y, groundAt)
+  local z = groundAt(x, y)
+  if z then return x, y, z end
+  for r = M.SAFE_RING_M, M.SAFE_MAX_M, M.SAFE_RING_M do
+    for k = 0, M.SAFE_DIRS - 1 do
+      local a = 2 * math.pi * k / M.SAFE_DIRS
+      local qx, qy = x + r * math.cos(a), y + r * math.sin(a)
+      z = groundAt(qx, qy)
+      if z then return qx, qy, z end
+    end
+  end
+  return nil
+end
+
+-- The ground under (x, y) from a ray down from z + 60 (nil: no collision within 200 m).
+function M.groundRay(z)
+  local ray = rawget(_G, 'castRayStatic')
+  return function(x, y)
+    if not ray then return z end
+    local d = ray(vec3(x, y, z + 60), vec3(0, 0, -1), 200)
+    if d and d < 200 then return z + 60 - d end
+    return nil
+  end
+end
+
 -- Put the player vehicle on the new ground at the origin, upright, keeping its heading.
 -- spawn.safeTeleport with resetVehicle=true resets the vehicle, drops its bounding box onto
 -- the ground (spawn.lua:494 getBBOnGround) and zeroes velocity (spawn.lua:533-534).
@@ -666,11 +707,48 @@ local function placePlayer(z)
   if (x ~= 0 or y ~= 0) and not st.placeSnapped then
     -- away from the origin (a BeamMP player's anchor): the server's height there is the raw elevation data; set down
     -- on the collision under it (a graded road can be a few metres off)
-    local ray = rawget(_G, 'castRayStatic')
-    local d = ray and ray(vec3(x, y, z + 60), vec3(0, 0, -1), 200)
-    if d and d < 200 then z = z + 60 - d + 1.0 end
+    local g = M.groundRay(z)(x, y)
+    if g then z = g + 1.0 end
+  end
+  -- nothing under the spot (a hole in the terrain: a tunnel's portal before its road tile): the nearest spot that has
+  -- some (safeSpot); a tunnel's tube (floorZ) is left to floorCheck
+  if not st.floorZ and rawget(_G, 'castRayStatic') and not M.groundRay(z)(x, y) then
+    local sx, sy, sz = M.safeSpot(x, y, M.groundRay(z))
+    if sx then
+      log('I', 'beamngEarth', string.format('teleport: no ground at (%.0f, %.0f), set down %.0f m away', x, y,
+        math.sqrt((sx - x) ^ 2 + (sy - y) ^ 2)))
+      x, y, z = sx, sy, sz + 1.0
+    end
   end
   spawn.safeTeleport(veh, vec3(x, y, z), quatFromDir(dir:normalized(), vec3(0, 0, 1)), nil, nil, false, nil, true)
+  st.placedAt = { x = x, y = y, z = z, t = st.clock }
+end
+
+-- After a teleport: a car falling far under where it was set down (through a hole nobody saw coming) is set down
+-- again on the nearest ground (FALL_WATCH_S, FALL_M).
+M.FALL_WATCH_S, M.FALL_M, M.FALL_MS = 30, 40, 15
+function M.fallGuard()
+  local pa = st.placedAt
+  if not pa then return end
+  if st.clock - pa.t > M.FALL_WATCH_S then st.placedAt = nil; return end
+  local veh = getPlayerVehicle(0)
+  if not veh then return end
+  local p = veh:getPosition()
+  local vz = veh:getVelocity().z
+  -- (falling, not driving down a mountain road: fast, and nothing under it)
+  if p.z < pa.z - M.FALL_M and vz < -M.FALL_MS and not M.groundRay(p.z - 58)(p.x, p.y) then
+    local sx, sy, sz = M.safeSpot(p.x, p.y, M.groundRay(pa.z))
+    if not sx then sx, sy, sz = M.safeSpot(pa.x, pa.y, M.groundRay(pa.z)) end
+    st.placedAt = nil
+    if sx then
+      log('W', 'beamngEarth', string.format('teleport: the car fell through at (%.0f, %.0f); set down again', p.x, p.y))
+      local dir = veh:getDirectionVector()
+      dir = vec3(dir.x, dir.y, 0)
+      if dir:length() < 1e-3 then dir = vec3(0, 1, 0) end
+      spawn.safeTeleport(veh, vec3(sx, sy, sz + 1.0), quatFromDir(dir:normalized(), vec3(0, 0, 1)), nil, nil, false, nil, true)
+      st.placedAt = { x = sx, y = sy, z = sz + 1.0, t = st.clock }
+    end
+  end
 end
 
 -- A teleport into a tunnel: once a ray down from just over its floor (floorZ) meets collision at the floor (the tube's
@@ -702,7 +780,7 @@ local function formatKnown(f)
 end
 
 local geocodeResults = {}       -- the world map's address search answers: id -> { results, error }
-local routeResults = {}         -- the GPS's planned routes: id -> { points, dist, dur, error }
+local routeResults = {}         -- the GPS's planned routes: id -> { points, dist, dur, steps, error }
 
 -- The pooled shape slots (far tiles, road / building tiles) let go since the last pose, for this server; nil if none.
 local function slotsGoneNow()
@@ -721,8 +799,9 @@ local function onMessage(msg)
       held = farfield.slotsHeld(farfield.session())
       for _, h in ipairs(roads.slotsHeld(farfield.session())) do held[#held + 1] = h end
     end
+    -- vegFlat: the vegetation tiles may come as one flat array of numbers (trees.lua onTile), no table per tree
     net.send({ type = 'hello', protocol = PROTOCOL, format = FORMAT, modVersion = MOD_VERSION,
-      sessions = farfield.heldSessions(), slotSession = farfield.session(), slotsHeld = held })
+      sessions = farfield.heldSessions(), slotSession = farfield.session(), slotsHeld = held, vegFlat = true })
     setStatus('Connected to companion server')
   elseif t == '_disconnected' then
     st.pending, st.sessionId, st.terrainPending = nil, nil, nil
@@ -732,13 +811,14 @@ local function onMessage(msg)
     if not st.anchor then st.autoTeleportDone = false end
     sea.clear()
     trees.clear()
+    ambience.clear()
     setStatus('Disconnected from companion server: ' .. tostring(msg.error))
   elseif t == 'hello' then
     st.sessionId = msg.sessionId
     st.refreshLater = nil       -- (a restarted server numbers its anchors from 1 again)
     roads.setSession(msg.sessionId)   -- the road / building tiles' pooled shape files belong to this server
-    lastHello = {}           -- the server's version and options, for the reports' hardware.json
-    for k, v in pairs(msg) do if k ~= 'attribution' and type(v) ~= 'table' then lastHello[k] = v end end
+    X.lastHello = {}           -- the server's version and options, for the reports' hardware.json
+    for k, v in pairs(msg) do if k ~= 'attribution' and type(v) ~= 'table' then X.lastHello[k] = v end end
     -- road tiles belong to the session that sent them: a restarted server (anchor ids start again
     -- at 1) never drops the old session's tiles, so they stayed forever (2026-10-11: meshes of four
     -- sessions in the scene, some built by older code)
@@ -818,8 +898,8 @@ local function onMessage(msg)
     if msg.radius ~= nil then M.setFarRadius(msg.radius) end
   elseif t == 'load_progress' then      -- the loading line's counts (server Connection.send_progress)
     st.loadProgress = msg
-  elseif t == 'share' then              -- our world server serving our BeamMP group (mpsession.lua, peerwork.py)
-    pcall(mpsession.onShare, msg)
+  -- elseif t == 'share' then           -- our world server serving our BeamMP group (shared world building,
+  --   pcall(mpsession.onShare, msg)    -- commented out 2026-10-27: mpsession.lua, peerwork.py)
   elseif t == 'terrain_patch' then
     pcall(terrainpatch.onPatch, msg)
   elseif t == 'anchor_ready' then
@@ -925,14 +1005,26 @@ local function onMessage(msg)
     if tonumber(msg.z) then st.groundAhead = { anchorId = msg.anchorId, z = tonumber(msg.z), at = st.clock } end
   elseif t == 'veg_tile' then
     -- trees, bushes and rocks of a tile (server vegetation.py, --trees on): Forest items (trees.lua)
-    trees.onTile(msg, st.anchorId)
+    local data = trees.onTile(msg, st.anchorId)
+    if data then ambience.onTile(msg.anchorId, msg.key, data) end
   elseif t == 'veg_drop' then
     trees.onDrop(msg)
+    ambience.onDrop(msg.anchorId, msg.key)
   elseif t == 'bldfar_tile' then
     -- far buildings (server buildings.far_tile, --buildings on): render-only, roads.lua
     roads.onFarTile(msg, st.anchorId)
   elseif t == 'bldfar_drop' then
     roads.onFarDrop(msg)
+  elseif t == 'bldsky_tile' then
+    -- the skyline past the far buildings (server buildings.skyline_tile): render-only, roads.lua
+    roads.onFarTile(msg, st.anchorId, true)
+  elseif t == 'bldsky_drop' then
+    roads.onFarDrop(msg, true)
+  elseif t == 'brfar_tile' then
+    -- the bridges past the road tiles (server buildings.far_bridge_tile): render-only, roads.lua
+    roads.onFarTile(msg, st.anchorId, 'B')
+  elseif t == 'brfar_drop' then
+    roads.onFarDrop(msg, 'B')
   elseif t == 'where_result' then
     statusbar.onResult(msg)
   elseif t == 'place_previews_ready' then      -- the level select's place pictures are there (levelinfo.lua)
@@ -946,7 +1038,8 @@ local function onMessage(msg)
       elseif not st.anchor then defaultStart() end
     end
   elseif t == 'route_result' then
-    if msg.id then routeResults[msg.id] = { points = msg.points or {}, dist = msg.dist, dur = msg.dur, error = msg.error } end
+    if msg.id then routeResults[msg.id] = { points = msg.points or {}, dist = msg.dist, dur = msg.dur, error = msg.error,
+      elev = msg.elev } end
   elseif t == 'route_download' then
     -- the planned route's corridor prefetch (server routeahead.py): total/done tile+cell count, shown on the map
     gps.onRouteDownload(msg)
@@ -963,6 +1056,10 @@ local function onMessage(msg)
   elseif t == 'nearest_fuel_result' then
     -- the gas station nearest the player (server fuelfind.py): settings.uiNearestFuelResult teleports there
     if msg.id then X.fuelResults[msg.id] = msg end
+  elseif t == 'phone_search_result' then
+    if msg.id then X.phoneSearchResults[msg.id] = { results = msg.results or {}, error = msg.error } end
+  elseif t == 'phone_reverse_result' then
+    if msg.id then X.phoneReverseResults[msg.id] = { name = msg.name, detail = msg.detail } end
   elseif t == 'map_tiles_ready' then
     -- a world map tile file is written (settings.mapTiles: the map polls every 250 ms while it misses tiles)
   elseif t == 'navgraph' then
@@ -1199,6 +1296,7 @@ end
 
 local function updateWorld(dt)
   if st.floorZ and not st.placeFrames then M.floorCheck() end
+  if st.placedAt and not st.placeFrames then M.fallGuard() end
   if st.placeFrames then
     st.placeFrames = st.placeFrames - 1
     if st.placeFrames <= 0 then
@@ -1588,7 +1686,10 @@ local function minimapNorth()
   return st.anchor:northAt(cx, cy)
 end
 local function drawUi(dt)
-  ui.draw(buildView(), { teleport = M.teleport, setRebaseDistance = M.setRebaseDistance })
+  -- the window's view only while it is shown: buildView walks every far tile (farfield.stats) and makes its tables, and
+  -- the window is hidden by default (settings hudVisible), where ui.draw returns at once (in-game 2026-10-26, Fells
+  -- Point, ~400 far tiles: drawUi 0.085-0.089 -> 0.009-0.011 ms a frame, 2.4 KB less garbage a frame)
+  if ui.visible then ui.draw(buildView(), { teleport = M.teleport, setRebaseDistance = M.setRebaseDistance }) end
   -- each element drawn by imgui unless its UI app is on screen (hudapps.lua)
   if not hudapps.mounted('credits') then credits.draw(st.active, creditsFallback) end
   updateBanner(dt)
@@ -1901,7 +2002,13 @@ local function onUpdate(dtReal, dtSim)
     farfield.update(gov, (gov.w1 or dtReal * 1000) / 1000, st.cam, st.player)
     t = mark('far', t)
     sea.update(st.anchorId, st.player)
-    trees.update(st.anchorId, st.player, M.viewAway())
+    -- the trees' own Lua time a frame (trees.lua FRAME_MS), more while the world loads, none in a heavy frame or the
+    -- quiet frames round it (governor.lua: a heavy frame stays a lone spike)
+    trees.update(st.anchorId, st.player, M.viewAway(), (gov.blocked or gov:isHeavyFrame()) and 0
+      or (gov.loading and trees.LOADING_FRAME_MS or trees.FRAME_MS))
+    pcall(ambience.update, st.anchorId, sea)      -- (sound never stops the world's updates)
+    pcall(pumpjacks.update)
+    pcall(nightlights.update)
     t = mark('sea+trees', t)
     local pb = nil
     if st.block then
@@ -1909,14 +2016,14 @@ local function onUpdate(dtReal, dtSim)
       st.parkBox = pb
       pb[1], pb[2], pb[3], pb[4] = lattice.groundBox(st.block.cx, st.block.cy)
     end
-    if not fociBroken then
+    if not X.fociBroken then
       local ok, err = pcall(collisionfoci.update, dtReal, { roads.setFoci, trees.setFoci }, extraFoci)
-      if not ok then fociBroken = true; log('E', 'beamngEarth', 'collision foci: ' .. tostring(err)) end
+      if not ok then X.fociBroken = true; log('E', 'beamngEarth', 'collision foci: ' .. tostring(err)) end
       t = mark('foci', t)
       ok, err = pcall(terrainpatch.update, dtReal, st.anchorId, collisionfoci.last, st.player, pb, net.send)
-      if not ok then fociBroken = true; log('E', 'beamngEarth', 'terrain patches: ' .. tostring(err)) end
+      if not ok then X.fociBroken = true; log('E', 'beamngEarth', 'terrain patches: ' .. tostring(err)) end
       ok, err = pcall(farcars.update, dtReal)
-      if not ok then fociBroken = true; log('E', 'beamngEarth', 'far cars: ' .. tostring(err)) end
+      if not ok then X.fociBroken = true; log('E', 'beamngEarth', 'far cars: ' .. tostring(err)) end
       t = mark('farcars', t)
     end
     parking.update(st.anchorId, not (st.player and st.player.camera) and st.player or nil, pb, gov)  -- (no car: none parked)
@@ -1984,7 +2091,7 @@ local function onLevelStart()
 
   activateWorld()
   -- the connected server's shape materials (its hello came at the main menu, before this level's objects)
-  if lastHello and lastHello.prewarm then roads.prewarm(lastHello.prewarm) end
+  if X.lastHello and X.lastHello.prewarm then roads.prewarm(X.lastHello.prewarm) end
   -- Something to stand on until the first anchor arrives (our level has no GroundPlane).
   local ok, err = terrain.loadFlat()
   if ok then
@@ -2055,6 +2162,9 @@ local function onClientEndMission()
   roads.reset()
   sea.reset()
   trees.reset()
+  ambience.reset()
+  pumpjacks.reset()
+  nightlights.reset()
   parking.reset()
   navgraph.reset()
   local sessionId, nextRequestId, mapPort = st.sessionId, st.nextRequestId, st.mapPort
@@ -2096,6 +2206,7 @@ local function onExtensionUnloaded()
   roads.clear()
   sea.clear()
   trees.clear()
+  ambience.clear()
   terrain.delete()
   -- M1h: the level stays loaded; give it back its sky and view distance
   horizon.restoreSky()
@@ -2249,9 +2360,9 @@ end
 
 -- The connected server's hello (its version and options; nil before one arrived), for the reports.
 function M.serverHello()
-  if not lastHello then return nil end
+  if not X.lastHello then return nil end
   local c = {}
-  for k, v in pairs(lastHello) do c[k] = v end
+  for k, v in pairs(X.lastHello) do c[k] = v end
   return c
 end
 
@@ -2269,7 +2380,7 @@ function M.status()
     cells = crossover.cells(), blockSize = blockSize, anchorLatency = st.anchorLatency,
     terrainLatency = st.terrainLatency, horizon = horizonOn, farRadius = farRadius,
     visibleDistance = st.visibleDistance or VISIBLE_DISTANCE, banner = banner.current().id, guard = st.guard.mode,
-    sessions = farfield.heldSessions(), tileSession = farfield.session(), sea = sea.status(), trees = trees.status() })
+    sessions = farfield.heldSessions(), tileSession = farfield.session(), sea = sea.status(), trees = trees.status(), ambience = ambience.status() })
 end
 
 -- The connection state line (the settings page shows it): the banner's { id, level, text } (text
@@ -2388,10 +2499,33 @@ function M.takeNearestFuel(id)
   X.fuelResults[id] = nil
   return r
 end
-function M.requestRoute(id, lat0, lon0, lat1, lon1, bearing)
+function M.requestRoute(id, lat0, lon0, lat1, lon1, bearing, steps, alternatives)
   if not net.isConnected() then return false end
-  net.send({ type = 'route', id = id, lat0 = lat0, lon0 = lon0, lat1 = lat1, lon1 = lon1, bearing = bearing })
+  net.send({ type = 'route', id = id, lat0 = lat0, lon0 = lon0, lat1 = lat1, lon1 = lon1, bearing = bearing,
+    steps = steps or nil, alternatives = alternatives or nil })
   return true
+end
+-- The phone's search (earthPhone.lua): the saved places, then Photon (phoneapi.py); the answer is phone_search_result.
+function M.requestPhoneSearch(id, q, lat, lon)
+  if not net.isConnected() then return false end
+  net.send({ type = 'phone_search', id = id, q = q, lat = lat, lon = lon })
+  return true
+end
+function M.takePhoneSearch(id)
+  local r = X.phoneSearchResults[id]
+  X.phoneSearchResults[id] = nil
+  return r
+end
+-- A dropped pin's name (earthPhone.lua): the server's nearest place, reversed (phoneapi.reverse).
+function M.requestPhoneReverse(id, lat, lon)
+  if not net.isConnected() then return false end
+  net.send({ type = 'phone_reverse', id = id, lat = lat, lon = lon })
+  return true
+end
+function M.takePhoneReverse(id)
+  local r = X.phoneReverseResults[id]
+  X.phoneReverseResults[id] = nil
+  return r
 end
 function M.takeRoute(id)
   local r = routeResults[id]
@@ -2415,6 +2549,42 @@ end
 function M._state() return st end -- read-only: the dev tools and the settings page
 function M._rebaseLag() return rebaseLag end -- for tests
 function M._governor() return gov end
+-- The in-vehicle map app's session context. Read-only snapshot: map tiles are obtained through
+-- settings.mapTiles(list), which requests files under /temp rather than using CEF HTTP.
+function M.dashboardContext()
+  local player
+  local pl = st.player
+  if pl then
+    player = { lat = pl.lat, lon = pl.lon, speed = pl.speed } -- speed is m/s
+    local veh = getPlayerVehicle and getPlayerVehicle(0)
+    if veh then
+      local ok, dir = pcall(function() return veh:getDirectionVector() end)
+      if ok and dir and math.abs(dir.x) + math.abs(dir.y) >= 1e-6 then
+        local heading = math.deg(math.atan2(dir.x, dir.y))
+        local anchor = st.anchor
+        if anchor and anchor.northAt then
+          local okN, nx, ny = pcall(anchor.northAt, anchor, pl.x, pl.y)
+          if okN and tonumber(nx) and tonumber(ny) then heading = heading - math.deg(math.atan2(nx, ny)) end
+        end
+        player.heading = (heading + 360) % 360 -- degrees clockwise from true north
+      end
+    end
+  end
+  local creditsByArea
+  if type(serverCreditsByArea) == 'table' then
+    creditsByArea = {}
+    for k, v in pairs(serverCreditsByArea) do creditsByArea[k] = v end
+  end
+  return {
+    active = st.inOurLevel == true,
+    connected = net.isConnected(),
+    mapPort = st.mapPort,
+    attribution = attributionText(farfield.counters()),
+    imageryCreditsByArea = creditsByArea,
+    otherCredits = serverOtherCredits,
+    player = player,
+  }
+end
 
 -- The Roads setting: off removes them; on again asks the server to send the tiles once more.
 function M.setRoadsEnabled(on)

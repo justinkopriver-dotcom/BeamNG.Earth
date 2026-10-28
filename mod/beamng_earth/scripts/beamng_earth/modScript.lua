@@ -3,6 +3,8 @@
 -- every 'manual' extension right after the modScripts (loadManualUnloadExtensions): an extensions.load here
 -- logs a deprecation warning per call.
 setExtensionUnloadMode('beamngEarth_core', 'manual')
+-- The in-vehicle satellite map (dashboard.lua: receives mission lifecycle callbacks).
+setExtensionUnloadMode('beamngEarth_dashboard', 'manual')
 -- The pause-menu settings page's Lua side (settings.lua) and the dev tools (dev.lua: everything off
 -- until the player turns something on; its hooks return at their first line meanwhile).
 setExtensionUnloadMode('beamngEarth_settings', 'manual')
@@ -11,3 +13,5 @@ setExtensionUnloadMode('beamngEarth_dev', 'manual')
 setExtensionUnloadMode('beamngEarth_report', 'manual')
 -- The BeamNG.Earth servers list for the tab in BeamMP's server browser (serverlist.lua; fetches only when asked).
 setExtensionUnloadMode('beamngEarth_serverlist', 'manual')
+-- The phone app's Lua side (earthPhone.lua: PgUp, the telemetry to the UI app, search and the destination).
+setExtensionUnloadMode('beamngEarth_earthPhone', 'manual')

@@ -28,12 +28,18 @@ M.FINES = { 100, 300, 750, 1500, 3000 }
 -- 150"): TICKET_BASE + TICKET_PER for each offense the police logged (speeding, reckless...), TICKET_MIN..TICKET_MAX
 M.TICKET_MIN, M.TICKET_MAX, M.TICKET_BASE, M.TICKET_PER = 30, 150, 30, 30
 M.IMPOUND, M.IMPOUND_FEE = 4, 750
+-- Forgiveness (the user, 2026-10-27: "they come after you for speeding or any infraction with no forgiveness"): the stock
+-- police's strictness (how strongly it detects infractions, default 0.5: an offense is called once a fault builds to
+-- 1 - strictness; the sight meter fills at that rate too) and how often they pick out a random suspect (0.5). Lower, so
+-- a short burst of speed or one rolled stop is let go and only sustained, reckless driving draws a chase.
+M.POLICE_VARS = { strictness = 0.2, suspectFrequency = 0.2 }
 
 local wallet = require('beamngEarth/wallet')
 
 local state = nil           -- { plates = { [plate] = heat }, looks = { [model|colour] = heat } }
 local chase = nil           -- { id, t, level, start }
 local checkT, coolT = 0, 0
+local tuned = false
 
 local function load()
   if state then return state end
@@ -175,17 +181,20 @@ function M.update(dt)
     end
     return
   end
+  if not tuned then M.tune() end
   coolT = coolT + dt
   if coolT >= 60 then
     local s = load()
+    local any = false
     for _, tbl in ipairs({ s.plates, s.looks }) do
       for k, h in pairs(tbl) do
         local n = (tonumber(h) or 0) - M.COOL * coolT / 60
         tbl[k] = n > 0.05 and n or nil
+        any = true
       end
     end
     coolT = 0
-    save()
+    if any then save() end            -- (performance: no disk write a minute when there is no heat to cool)
   end
   checkT = checkT + dt
   if checkT < 1 or not (police and police.getNearestPoliceVehicle and be_) then return end
@@ -202,6 +211,15 @@ function M.update(dt)
   end
 end
 
+-- The forgiving police settings (the stock ones are reset when a level ends): once per level, and again whenever
+-- world traffic is switched on.
+function M.tune()
+  local police = rawget(_G, 'gameplay_police')
+  if not (police and police.setPoliceVars) then return false end
+  tuned = pcall(police.setPoliceVars, M.POLICE_VARS) or false
+  return tuned
+end
+
 -- For the HUD: the player's car's heat now.
 function M.current()
   if chase then return chase.heat end
@@ -209,7 +227,7 @@ function M.current()
   return M.heatOf(M.identity(playerVeh()), s.plates, s.looks)
 end
 
-function M._reset() state, chase, checkT, coolT = nil, nil, 0, 0 end   -- tests
+function M._reset() state, chase, checkT, coolT, tuned = nil, nil, 0, 0, false end   -- tests
 function M._state() return load() end
 function M._chase() return chase end
 

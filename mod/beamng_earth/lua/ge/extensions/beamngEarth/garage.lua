@@ -72,6 +72,9 @@ function M.refresh(kind, lat, lon)
   return c.requestPlacesNear(reqId, lat, lon, kind)
 end
 
+-- the ring scan (M.update): its timer, the near spots, their ground heights, the anchor they were measured in
+local scanT, near, zCache, nearAnchor = math.huge, {}, {}, nil
+
 local function poll()
   local c = core()
   for kind, id in pairs(pending) do
@@ -79,6 +82,7 @@ local function poll()
     if r then
       pending[kind] = nil
       lists[kind] = type(r.places) == 'table' and r.places or {}
+      scanT = math.huge                 -- (new places: placed at once, not at the next scan)
       listErr[kind] = (#lists[kind] == 0) and (r.error or 'none near here') or nil
       -- (your places take the newest spot: the bench against the wall, 2026-10-26)
       local st, changed = load(), false
@@ -357,6 +361,7 @@ M.SCREEN = '/art/shapes/garage_and_dealership/garage/s_laptop_ON.dae'
 M.BENCH_TOP = 0.67
 M.LAPTOP_X = 0.9              -- along the bench from its middle
 local props, inRing = {}, nil
+M.SCAN_S = 0.5
 
 local function spots()
   local out = {}
@@ -427,43 +432,57 @@ function M.update(dt, anchor, player)
     if shop.t > M.SHOP_S then shop = nil end
   end
   if not (anchor and player) then return end
-  local dd = rawget(_G, 'debugDrawer')
-  local seen = {}
-  for _, s in ipairs(spots()) do
-    local x, y = anchor:geodeticToEnu(s.lat, s.lon, 0)
-    local dist = math.sqrt((x - player.x) ^ 2 + (y - player.y) ^ 2)
-    if dist < M.PROPS_M then
-      seen[s.id] = true
-      local z = groundZ(x, y, player.z or 0)
-      -- the bench against the wall (server shops.wall_spot), else beside the ring as before
-      local key = tostring(s.dlat) .. ',' .. tostring(s.dlon)
-      if props[s.id] and props[s.id].key ~= key then removeProps(s.id) end
-      if props[s.id] == nil then
-        if s.dlat and s.dlon then
-          local bx, by = anchor:geodeticToEnu(s.dlat, s.dlon, 0)
-          placeProps(s.id, bx, by, groundZ(bx, by, player.z or 0), tonumber(s.dyaw) or 0, key)
-        else
-          placeProps(s.id, x + 2.5, y, z, 0, key)
+  -- (performance, 2026-10-26: the spots, their positions and ground heights were rebuilt every frame, a ground ray per
+  -- spot per frame; now SCAN_S apart, each spot's ground looked up once per anchor; the rings drawn from that list)
+  scanT = scanT + (dt or 0)
+  if scanT >= M.SCAN_S or nearAnchor ~= anchor then
+    scanT = 0
+    if nearAnchor ~= anchor then zCache, nearAnchor = {}, anchor end
+    local seen = {}
+    near = {}
+    for _, s in ipairs(spots()) do
+      local x, y = anchor:geodeticToEnu(s.lat, s.lon, 0)
+      local dist = math.sqrt((x - player.x) ^ 2 + (y - player.y) ^ 2)
+      if dist < M.PROPS_M then
+        seen[s.id] = true
+        local z = groundZ(x, y, player.z or 0)       -- (once a scan, not a frame: the ground may load late)
+        zCache[s.id] = z
+        -- the bench against the wall (server shops.wall_spot), else beside the ring as before
+        local key = tostring(s.dlat) .. ',' .. tostring(s.dlon)
+        if props[s.id] and props[s.id].key ~= key then removeProps(s.id) end
+        if props[s.id] == nil then
+          if s.dlat and s.dlon then
+            local bx, by = anchor:geodeticToEnu(s.dlat, s.dlon, 0)
+            placeProps(s.id, bx, by, groundZ(bx, by, player.z or 0), tonumber(s.dyaw) or 0, key)
+          else
+            placeProps(s.id, x + 2.5, y, z, 0, key)
+          end
         end
-      end
-      if dd and dist < M.DRAW_M then
-        pcall(function()
-          dd:drawCylinder(vec3(x, y, z), vec3(x, y, z + 0.08), M.RING_M, ColorF(0.1, 0.45, 1.0, 0.45))
-        end)
-      end
-      local speed = math.sqrt((player.vx or 0) ^ 2 + (player.vy or 0) ^ 2)
-      if dist <= M.RING_M and speed < 1.5 then
-        if inRing ~= s.id then
-          inRing = s.id
-          local gh = rawget(_G, 'guihooks')
-          if gh and gh.trigger then gh.trigger('BneEarthPhone', { up = true, app = s.app }) end
-        end
-      elseif inRing == s.id and dist > M.RING_M + 3 then
-        inRing = nil
+        near[#near + 1] = { id = s.id, app = s.app, x = x, y = y, z = z }
       end
     end
+    for id in pairs(props) do if not seen[id] then removeProps(id) end end
   end
-  for id in pairs(props) do if not seen[id] then removeProps(id) end end
+  -- every frame: the near rings drawn, and stopping in one opens its menu
+  local dd = rawget(_G, 'debugDrawer')
+  local speed = math.sqrt((player.vx or 0) ^ 2 + (player.vy or 0) ^ 2)
+  for _, s in ipairs(near) do
+    local dist = math.sqrt((s.x - player.x) ^ 2 + (s.y - player.y) ^ 2)
+    if dd and dist < M.DRAW_M then
+      pcall(function()
+        dd:drawCylinder(vec3(s.x, s.y, s.z), vec3(s.x, s.y, s.z + 0.08), M.RING_M, ColorF(0.1, 0.45, 1.0, 0.45))
+      end)
+    end
+    if dist <= M.RING_M and speed < 1.5 then
+      if inRing ~= s.id then
+        inRing = s.id
+        local gh = rawget(_G, 'guihooks')
+        if gh and gh.trigger then gh.trigger('BneEarthPhone', { up = true, app = s.app }) end
+      end
+    elseif inRing == s.id and dist > M.RING_M + 3 then
+      inRing = nil
+    end
+  end
 end
 
 -- For the phone (settings.uiGarage).
@@ -486,8 +505,8 @@ function M.uiState(anchor, player)
 end
 
 function M._shop() return shop end
-function M._reset() shop = nil; state, lists, listErr, pending, last = nil, { repair = {}, property = {} }, {}, {}, nil end
-function M._setList(kind, l) lists[kind] = l end
+function M._reset() shop = nil; scanT, near, zCache, nearAnchor = math.huge, {}, {}, nil; state, lists, listErr, pending, last = nil, { repair = {}, property = {} }, {}, {}, nil end
+function M._setList(kind, l) lists[kind] = l; scanT = math.huge end
 function M._state() return load() end
 
 return M
